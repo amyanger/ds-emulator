@@ -3,12 +3,9 @@
 // Project-wide common types, aliases, and helpers.
 // Every subsystem header includes this.
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <span>
-#include <type_traits>
 
 namespace ds {
 

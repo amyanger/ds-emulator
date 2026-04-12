@@ -7,13 +7,17 @@
 #include "ds/common.hpp"
 
 #include <array>
+#include <cassert>
 #include <cstddef>
+#include <type_traits>
 
 namespace ds {
 
 template <typename T, std::size_t N>
 class CircularBuffer {
     static_assert(N > 0, "CircularBuffer capacity must be > 0");
+    static_assert(std::is_trivially_copyable_v<T>,
+                  "CircularBuffer<T, N> requires trivially-copyable T");
 
 public:
     constexpr std::size_t capacity() const { return N; }
@@ -32,6 +36,8 @@ public:
     }
 
     T pop() {
+        // Caller must ensure !empty(); popping an empty buffer is undefined.
+        assert(!empty());
         T value = buf_[head_];
         head_ = (head_ + 1) % N;
         --count_;

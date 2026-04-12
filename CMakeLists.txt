@@ -18,9 +18,6 @@ include(cmake/CompilerWarnings.cmake)
 include(cmake/AppleSilicon.cmake)
 include(cmake/Sanitizers.cmake)
 
-# SDL2
-find_package(SDL2 REQUIRED)
-
 # Subdirectories
 add_subdirectory(src)
 

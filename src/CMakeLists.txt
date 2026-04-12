@@ -7,9 +7,8 @@ add_library(ds_core STATIC
     cpu/arm7/arm7.cpp
 )
 target_include_directories(ds_core
-    PUBLIC
-        ${CMAKE_SOURCE_DIR}/include
-        ${CMAKE_SOURCE_DIR}/src
+    PUBLIC  ${CMAKE_SOURCE_DIR}/include
+    PRIVATE ${CMAKE_SOURCE_DIR}/src
 )
 target_enable_warnings(ds_core)
 target_apple_silicon(ds_core)

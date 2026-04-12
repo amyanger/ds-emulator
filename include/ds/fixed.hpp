@@ -55,9 +55,10 @@ struct Fixed {
     template <unsigned I2, unsigned F2>
     constexpr Fixed<I2, F2> as() const {
         if constexpr (F2 >= F) {
-            return Fixed<I2, F2>::from_raw(static_cast<i32>(value) << (F2 - F));
+            const i64 wide = static_cast<i64>(value) << (F2 - F);
+            return Fixed<I2, F2>::from_raw(static_cast<i32>(wide));
         } else {
-            return Fixed<I2, F2>::from_raw(static_cast<i32>(value) >> (F - F2));
+            return Fixed<I2, F2>::from_raw(static_cast<i32>(value >> (F - F2)));
         }
     }
 };
