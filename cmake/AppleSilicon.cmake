@@ -1,0 +1,13 @@
+# Flag-gated: when DS_TARGET_APPLE_SILICON=ON, applies arm64-specific tuning.
+# Usage: target_apple_silicon(my_target)
+function(target_apple_silicon target)
+    if(NOT DS_TARGET_APPLE_SILICON)
+        return()
+    endif()
+    if(NOT APPLE)
+        message(WARNING "DS_TARGET_APPLE_SILICON=ON on non-Apple platform; ignoring")
+        return()
+    endif()
+    target_compile_options(${target} PRIVATE -mcpu=apple-m1)
+    target_compile_definitions(${target} PRIVATE DS_APPLE_SILICON=1)
+endfunction()
