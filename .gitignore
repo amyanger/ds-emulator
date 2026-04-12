@@ -1,0 +1,30 @@
+# Build artifacts
+build/
+*.o
+*.a
+*.so
+*.dylib
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+Makefile
+cmake_install.cmake
+
+# IDE
+.vscode/
+.idea/
+.cache/
+compile_commands.json
+.clangd/
+
+# macOS
+.DS_Store
+
+# Project-specific
+roms/
+saves/
+dump_mainram.bin
+dump_vram.bin
+savestate_*.bin
+stderr.log
