@@ -16,6 +16,4 @@ target_enable_sanitizers(ds_core)
 
 # ds_frontend — SDL2-owning static library. This is the ONLY target that may
 # include SDL headers.
-# TODO P0.10: Re-enable once src/frontend/CMakeLists.txt exists. Commented out
-# in the Tasks 1-9 batch so `ds_core` can build standalone for verification.
-# add_subdirectory(frontend)
+add_subdirectory(frontend)
