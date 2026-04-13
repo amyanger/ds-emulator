@@ -1,38 +1,57 @@
 #pragma once
 
 #include "ds/common.hpp"
+#include "scheduler/event.hpp"
 
-#include <cstdint>
+#include <limits>
+#include <unordered_set>
+#include <vector>
 
 namespace ds {
 
-// Placeholder event kind set for Phase 0. Real enumeration lives in Phase 1.
-enum class EventKind : uint32_t {
-    None = 0,
-    FrameEnd,
-};
-
-// Phase 0 skeleton. Only exposes `now()` and a stubbed `advance_to` that
-// updates the clock without firing events.
+// Pure data structure. Holds no reference to NDS and dispatches nothing.
+// NDS::run_frame drives the `peek_next -> run_until -> set_now -> pop_due`
+// loop and routes popped events through NDS::on_scheduler_event.
 class Scheduler {
 public:
+    static constexpr Cycle kNoEvent = std::numeric_limits<Cycle>::max();
+
     Scheduler() = default;
 
+    void reset();
+
+    EventId schedule_at(Cycle when, EventKind kind, u64 payload = 0);
+
     Cycle now() const { return now_; }
+    void  set_now(Cycle t);
 
-    // Phase 0: just bump the clock. Phase 1 will pop the heap and fire events.
-    void advance_to(Cycle target) {
-        if (target > now_) {
-            now_ = target;
-        }
-    }
+    // Returns the `when` of the earliest live event, or kNoEvent if none.
+    // Non-const because it lazily drops tombstoned events from the heap head.
+    Cycle peek_next();
 
-    // Phase 1 will implement these. For now, stubs that do nothing so callers
-    // can link.
-    void reset() { now_ = 0; }
+    // Pops the earliest live event if its `when` is <= target. Returns true
+    // and writes the event to `out` on success, false if the heap is empty
+    // or the next live event is in the future.
+    bool  pop_due(Cycle target, Event& out);
 
 private:
-    Cycle now_ = 0;
+    struct HeapCmp {
+        // std::push_heap / std::pop_heap use operator() as a "less", producing
+        // a max-heap of that order. Invert for a min-heap keyed on (when, id).
+        bool operator()(const Event& a, const Event& b) const {
+            if (a.when != b.when) return a.when > b.when;
+            return a.id > b.id;
+        }
+    };
+
+    std::vector<Event>          heap_;
+    std::unordered_set<EventId> cancelled_;
+    Cycle                       now_     = 0;
+    EventId                     next_id_ = 1;
+
+    // Drops tombstoned events from the top of the heap until heap_[0] is
+    // live or the heap is empty. Shared by peek_next and pop_due.
+    void drop_head_tombstones();
 };
 
 }  // namespace ds

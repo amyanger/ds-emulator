@@ -17,3 +17,4 @@ endfunction()
 
 add_ds_unit_test(fixed_test)
 add_ds_unit_test(ring_buffer_test)
+add_ds_unit_test(scheduler_test)

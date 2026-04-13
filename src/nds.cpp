@@ -22,7 +22,7 @@ void NDS::run_frame() {
     const Cycle target = scheduler_.now() + kFrameCycles;
     cpu9_.run_until(target);
     cpu7_.run_until(target);
-    scheduler_.advance_to(target);
+    scheduler_.set_now(target);
     frame_done_ = true;
 }
 
