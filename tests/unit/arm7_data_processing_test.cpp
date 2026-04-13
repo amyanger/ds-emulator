@@ -185,10 +185,31 @@ static void mov_reg_to_pc_stomps_pc() {
     NDS nds;
     nds.cpu7().state().r[1] = 0x0380'0000u;
     // MOV R15, R1 -> 0xE1A0'F001
-    // write_rd masks ~0x3 and stomps state.pc — 0x0380'0000 is already aligned.
+    // Exercises write_rd's rd==15 branch: sets state.r[15] AND stomps
+    // state.pc (with the ~0x3 alignment mask). A regression that updates
+    // only one of the two would previously pass all other tests.
     run_one(nds, 0x0380'0000u, 0xE1A0'F001u);
     REQUIRE(nds.cpu7().state().r[15] == 0x0380'0000u);
     REQUIRE(nds.cpu7().state().pc == 0x0380'0000u);
+}
+
+static void movs_reg_lsl_1_sets_c_from_shifter() {
+    NDS nds;
+    nds.cpu7().state().r[2] = 0x8000'0000u;
+    // MOVS R0, R2, LSL #1 -> 0xE1B0'0082
+    //   cond=E, 00, I=0, opcode=MOV(0xD), S=1, Rn=0, Rd=0,
+    //   amount=1, type=LSL(0), bit4=0, Rm=2
+    // Shifting 0x80000000 left by 1 drops bit 31 into the carry,
+    // so: op2.value = 0, op2.carry = 1. Result (MOV) = 0 -> Z=1, N=0.
+    // Logical form -> C = op2.carry = 1, V unchanged. Closes the
+    // Task 6 + Task 7 composition gap (shifter carry -> set_c).
+    run_one(nds, 0x0380'0000u, 0xE1B0'0082u);
+    REQUIRE(nds.cpu7().state().r[0] == 0u);
+
+    const u32 cpsr = nds.cpu7().state().cpsr;
+    REQUIRE((cpsr & (1u << 30)) != 0);  // Z set
+    REQUIRE((cpsr & (1u << 31)) == 0);  // N clear
+    REQUIRE((cpsr & (1u << 29)) != 0);  // C from shifter carry-out
 }
 
 int main() {
@@ -205,6 +226,7 @@ int main() {
     sub_reg_lsr_1();
     mov_reg_asr_31_sign_extends();
     mov_reg_to_pc_stomps_pc();
+    movs_reg_lsl_1_sets_c_from_shifter();
     std::puts("arm7_data_processing_test OK");
     return 0;
 }
