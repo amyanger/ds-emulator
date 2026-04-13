@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bus/arm7_bus.hpp"
 #include "bus/arm9_bus.hpp"
 #include "bus/wram_control.hpp"
 #include "cpu/arm7/arm7.hpp"
@@ -25,6 +26,7 @@ public:
     Arm9&      cpu9()      { return cpu9_; }
     Arm7&      cpu7()      { return cpu7_; }
     Arm9Bus&   arm9_bus()  { return arm9_bus_; }
+    Arm7Bus&   arm7_bus()  { return arm7_bus_; }
 
     // ARM9 I/O dispatch. All methods are stubs in this slice (return 0 /
     // ignore writes). The real WRAMCNT handler at 0x0400'0247 lands in a
@@ -35,6 +37,14 @@ public:
     void arm9_io_write32(u32 addr, u32 value);
     void arm9_io_write16(u32 addr, u16 value);
     void arm9_io_write8 (u32 addr, u8  value);
+
+    // ARM7 I/O dispatch. Stubs until ARM7 I/O registers are wired.
+    u32  arm7_io_read32 (u32 addr);
+    u16  arm7_io_read16 (u32 addr);
+    u8   arm7_io_read8  (u32 addr);
+    void arm7_io_write32(u32 addr, u32 value);
+    void arm7_io_write16(u32 addr, u16 value);
+    void arm7_io_write8 (u32 addr, u8  value);
 
 private:
     // Central dispatch for scheduler events — the only place EventKind values
@@ -58,6 +68,7 @@ private:
 
     WramControl wram_ctl_{};
     Arm9Bus     arm9_bus_;
+    Arm7Bus     arm7_bus_;
 };
 
 }  // namespace ds

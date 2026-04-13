@@ -7,7 +7,8 @@ namespace ds {
 static constexpr Cycle kFrameCycles = 1'120'380;
 
 NDS::NDS()
-    : arm9_bus_(*this, main_ram_.data(), shared_wram_.data(), wram_ctl_) {
+    : arm9_bus_(*this, main_ram_.data(), shared_wram_.data(), wram_ctl_),
+      arm7_bus_(*this, main_ram_.data(), shared_wram_.data(), arm7_wram_.data(), wram_ctl_) {
     reset();
 }
 
@@ -23,6 +24,7 @@ void NDS::reset() {
 
     wram_ctl_.reset();
     arm9_bus_.reset();
+    arm7_bus_.reset();
 }
 
 void NDS::run_frame() {
@@ -57,5 +59,12 @@ u8  NDS::arm9_io_read8  (u32 /*addr*/) { return 0; }
 void NDS::arm9_io_write32(u32 /*addr*/, u32 /*value*/) {}
 void NDS::arm9_io_write16(u32 /*addr*/, u16 /*value*/) {}
 void NDS::arm9_io_write8 (u32 /*addr*/, u8  /*value*/) {}
+
+u32 NDS::arm7_io_read32 (u32 /*addr*/) { return 0; }
+u16 NDS::arm7_io_read16 (u32 /*addr*/) { return 0; }
+u8  NDS::arm7_io_read8  (u32 /*addr*/) { return 0; }
+void NDS::arm7_io_write32(u32 /*addr*/, u32 /*value*/) {}
+void NDS::arm7_io_write16(u32 /*addr*/, u16 /*value*/) {}
+void NDS::arm7_io_write8 (u32 /*addr*/, u8  /*value*/) {}
 
 }  // namespace ds
