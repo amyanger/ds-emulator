@@ -19,6 +19,10 @@ EventId Scheduler::schedule_at(Cycle when, EventKind kind, u64 payload) {
     return id;
 }
 
+EventId Scheduler::schedule_in(Cycle delta, EventKind kind, u64 payload) {
+    return schedule_at(now_ + delta, kind, payload);
+}
+
 void Scheduler::cancel(EventId id) {
     cancelled_.insert(id);
 }

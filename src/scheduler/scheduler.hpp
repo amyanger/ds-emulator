@@ -21,6 +21,7 @@ public:
     void reset();
 
     EventId schedule_at(Cycle when, EventKind kind, u64 payload = 0);
+    EventId schedule_in(Cycle delta, EventKind kind, u64 payload = 0);
 
     // Mark an event as cancelled. Idempotent; unknown ids are a no-op.
     // The event stays in the heap as a tombstone until popped.
