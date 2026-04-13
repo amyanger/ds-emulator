@@ -198,13 +198,19 @@ dereferenced once and the hot loop is a direct call.
 
 `class Arm9Bus` and `class Arm7Bus` each own:
 
-- A **256-entry page table** per access size (read8/16/32, write8/16/32),
-  keyed on the top 8 bits of the address, pointing at either a direct memory
-  base pointer or a function-pointer dispatch for I/O regions. Rebuilt in
-  slices when VRAM banking or TCM mapping changes.
+- A **256-entry page table** keyed on the top 8 bits of the address. Each
+  entry is a `{u8* ptr, u32 mask}` pair: when `ptr` is non-null, the fast
+  path resolves the access as `ptr[addr & mask]` with a `std::memcpy` for
+  load/store. Entries for palette / OAM / VRAM (which have 8-bit-write
+  promotion rules) will be split by access size when those regions land in
+  Phase 2; until then one shared read/write table is sufficient.
+- A **slow-path dispatcher** invoked whenever `ptr` is null. Handles I/O
+  regions (`0x04xx'xxxx`, routed through `NDS::armN_io_*`) and sub-region
+  splits that a single 16-MB page entry cannot represent — notably ARM7's
+  `0x03xx'xxxx`, which holds both shared WRAM (`0x0300'0000`) and private
+  ARM7 WRAM (`0x0380'0000`).
 - **References to shared memory** living on `NDS` — no duplication.
-- **Waitstate tables** for timing (ARM9 with TCM = 1 cycle, main RAM = 9
-  cycles, VRAM = varies per bank).
+- **Waitstate tables** for timing — deferred until the CPUs need them.
 
 Waitstates feed the CPU's cycle counter per access. Page table rebuild is
 O(pages affected), not O(all 256), so a VRAM-only change costs ~5 writes.
@@ -226,13 +232,20 @@ All real memory is owned by `class NDS` as flat byte arrays:
 | Region        | Size         | Owner                 | Notes                                                       |
 |---------------|--------------|-----------------------|-------------------------------------------------------------|
 | Main RAM      | 4 MB         | `NDS::main_ram`       | Shared; ARM9 hits cached, ARM7 uncached                     |
-| Shared WRAM   | 32 KB        | `NDS::shared_wram`    | Bankable per `WRAMCNT` (4 modes)                            |
+| Shared WRAM   | 32 KB        | `NDS::shared_wram_`   | Bankable per `WRAMCNT` (4 modes); state owned by `WramControl` |
 | ARM7 WRAM     | 64 KB        | `NDS::arm7_wram`      | Private to ARM7                                             |
 | VRAM banks    | 656 KB total | `NDS::vram[9]`        | 9 banks (A-I) with independent runtime mapping               |
 | Palette RAM   | 2 KB         | `NDS::palette`        | 1 KB main + 1 KB sub                                        |
 | OAM           | 2 KB         | `NDS::oam`            | 1 KB main + 1 KB sub                                        |
 | ITCM / DTCM   | 32 + 16 KB   | `Arm9::{itcm,dtcm}`   | ARM9 private, CP15-remappable                                |
 | Firmware      | 256 KB       | `NDS::firmware_bytes` | Synthesized; only header is meaningful for direct boot      |
+
+`WRAMCNT` lives in a dedicated `class WramControl` held by `NDS`. Writes to
+`0x0400'0247` are routed through `NDS::arm9_io_write8` (ARM7 cannot modify
+this register — rule 4), which updates `WramControl` and then calls
+`rebuild_shared_wram()` on both buses. ARM9's entry 0x03 rebuilds to a
+concrete `{ptr, mask}` pair; ARM7's entry stays null and the slow-path
+dispatcher reads `WramControl` directly.
 
 ### 4.2 VRAM banking
 
