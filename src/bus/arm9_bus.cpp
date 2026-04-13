@@ -31,17 +31,18 @@ void Arm9Bus::reset() {
 }
 
 void Arm9Bus::rebuild_shared_wram() {
-    // WRAMCNT from ARM9's point of view:
+    // WRAMCNT from ARM9's point of view (verified against melonDS
+    // src/NDS.cpp::MapSharedWRAM):
     //   0: 32 KB mapped, mirrored across 0x03xx'xxxx
-    //   1: low  16 KB mapped, mirrored across 0x03xx'xxxx
-    //   2: high 16 KB mapped, mirrored across 0x03xx'xxxx
+    //   1: second 16 KB (offset 0x4000) mapped, mirrored
+    //   2: first  16 KB (offset 0x0000) mapped, mirrored
     //   3: unmapped — reads return 0 (open bus), writes ignored
     const u8 mode = wram_ctl_->value();
     PageEntry entry{};
     switch (mode) {
         case 0: entry = PageEntry{shared_wram_,           0x0000'7FFFu}; break;
-        case 1: entry = PageEntry{shared_wram_,           0x0000'3FFFu}; break;
-        case 2: entry = PageEntry{shared_wram_ + 0x4000u, 0x0000'3FFFu}; break;
+        case 1: entry = PageEntry{shared_wram_ + 0x4000u, 0x0000'3FFFu}; break;
+        case 2: entry = PageEntry{shared_wram_,           0x0000'3FFFu}; break;
         case 3: entry = PageEntry{nullptr,                0};            break;
     }
     table_.read [kRegionSharedWram] = entry;

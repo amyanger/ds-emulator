@@ -26,8 +26,9 @@ public:
     Arm7&      cpu7()      { return cpu7_; }
     Arm9Bus&   arm9_bus()  { return arm9_bus_; }
 
-    // ARM9 I/O dispatch. This slice only handles WRAMCNT (0x0400'0247);
-    // everything else reads as 0 and ignores writes. Task 5 wires WRAMCNT.
+    // ARM9 I/O dispatch. All methods are stubs in this slice (return 0 /
+    // ignore writes). The real WRAMCNT handler at 0x0400'0247 lands in a
+    // later slice-2 task.
     u32  arm9_io_read32 (u32 addr);
     u16  arm9_io_read16 (u32 addr);
     u8   arm9_io_read8  (u32 addr);

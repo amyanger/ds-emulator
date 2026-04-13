@@ -11,7 +11,8 @@ class WramControl;
 // ARM9's view of memory. Owns a 256-entry page table keyed on the top 8
 // bits of the address. Fast-path reads/writes do a single lookup + memcpy.
 // Unmapped addresses and I/O regions fall through to the owning NDS's I/O
-// dispatcher (which in this slice only handles WRAMCNT at 0x0400'0247).
+// dispatcher (which in this slice is a stub returning 0 for all I/O; the
+// real WRAMCNT handler lands in a later slice-2 task).
 class Arm9Bus {
 public:
     Arm9Bus(NDS& nds, u8* main_ram, u8* shared_wram, const WramControl& wram_ctl);
