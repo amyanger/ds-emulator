@@ -23,7 +23,7 @@ struct PageEntry {
 // Per design spec §3.4 the final implementation will split the table by
 // access size (read8/16/32, write8/16/32) to support 8-bit-write promotion
 // on palette / OAM / VRAM. This slice uses a single shared table because
-// those regions don't exist yet. See task 7 for the spec amendment.
+// those regions don't exist yet.
 struct PageTable {
     std::array<PageEntry, 256> read{};
     std::array<PageEntry, 256> write{};

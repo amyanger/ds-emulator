@@ -1,11 +1,13 @@
-// Unit tests for PageTable / PageEntry. Exercises the fast-path shape
-// without any bus class wrapping it, so failures localize here before
-// Arm9Bus / Arm7Bus add their own behavior on top.
+// Unit tests for PageTable / PageEntry and WramControl. Exercises the
+// fast-path shape without any bus class wrapping it, so failures localize
+// here before Arm9Bus / Arm7Bus add their own behavior on top.
 
 #include "bus/page_table.hpp"
+#include "bus/wram_control.hpp"
 #include "require.hpp"
 
 #include <array>
+#include <cstdio>
 
 using namespace ds;
 
@@ -24,13 +26,26 @@ static void default_constructed_is_all_unmapped() {
 static void clear_resets_all_entries() {
     PageTable table;
     std::array<u8, 16> storage{};
-    table.read [0x02] = PageEntry{storage.data(), 0x0000'000F};
-    table.write[0x02] = PageEntry{storage.data(), 0x0000'000F};
+
+    // Populate multiple slots with non-zero ptr AND non-zero mask so a
+    // future clear() regression that drops one of the two fields fails.
+    table.read [0x00] = PageEntry{storage.data(), 0x0000'000F};
+    table.read [0x02] = PageEntry{storage.data(), 0x003F'FFFF};
+    table.read [0xFF] = PageEntry{storage.data(), 0xFFFF'FFFF};
+    table.write[0x00] = PageEntry{storage.data(), 0x0000'000F};
+    table.write[0x02] = PageEntry{storage.data(), 0x003F'FFFF};
+    table.write[0xFF] = PageEntry{storage.data(), 0xFFFF'FFFF};
 
     table.clear();
 
-    REQUIRE(table.read [0x02].ptr == nullptr);
-    REQUIRE(table.write[0x02].ptr == nullptr);
+    for (const auto& e : table.read) {
+        REQUIRE(e.ptr == nullptr);
+        REQUIRE(e.mask == 0);
+    }
+    for (const auto& e : table.write) {
+        REQUIRE(e.ptr == nullptr);
+        REQUIRE(e.mask == 0);
+    }
 }
 
 static void mask_mirrors_short_storage_across_the_region() {
@@ -51,9 +66,34 @@ static void mask_mirrors_short_storage_across_the_region() {
     REQUIRE(e.ptr[(0x02FF'FFFFu) & e.mask] == 0xDD);
 }
 
+static void wram_control_reset_zeroes_value() {
+    WramControl wc;
+    wc.write(0x3);
+    wc.reset();
+    REQUIRE(wc.value() == 0);
+}
+
+static void wram_control_write_masks_reserved_bits() {
+    WramControl wc;
+    wc.write(0xFF);
+    REQUIRE(wc.value() == 0x3);  // top 6 bits are reserved, read as zero
+}
+
+static void wram_control_write_passes_valid_modes_through() {
+    WramControl wc;
+    wc.write(0);       REQUIRE(wc.value() == 0);
+    wc.write(0x1);     REQUIRE(wc.value() == 0x1);
+    wc.write(0x2);     REQUIRE(wc.value() == 0x2);
+    wc.write(0x3);     REQUIRE(wc.value() == 0x3);
+}
+
 int main() {
     default_constructed_is_all_unmapped();
     clear_resets_all_entries();
     mask_mirrors_short_storage_across_the_region();
+    wram_control_reset_zeroes_value();
+    wram_control_write_masks_reserved_bits();
+    wram_control_write_passes_valid_modes_through();
+    std::printf("page_table_test: all passed\n");
     return 0;
 }
