@@ -101,7 +101,7 @@ describes per-phase work order, checklists, and verification steps.
 ### 2.2 Structural rules (non-negotiable)
 
 1. **The scheduler is the clock.** Nothing advances time except
-   `scheduler.run_until(t)`. Subsystems never sleep, wait, or run their own
+   `scheduler.set_now(t)`. Subsystems never sleep, wait, or run their own
    time loops.
 2. **Two bus domains, not one.** ARM9 and ARM7 each own a `class Bus` that
    models that CPU's view of memory. Shared backing storage lives on `NDS`;
@@ -123,7 +123,7 @@ describes per-phase work order, checklists, and verification steps.
 ```cpp
 void NDS::run_frame() {
     // FrameEnd fires at the end of VBlank and sets `frame_done = true`
-    // via its event handler in scheduler.cpp.
+    // via on_scheduler_event in nds.cpp.
     scheduler.schedule_at(next_vblank_end_cycle, EventKind::FrameEnd);
     frame_done = false;
     while (!frame_done) {
