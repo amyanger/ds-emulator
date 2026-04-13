@@ -6,7 +6,8 @@ namespace ds {
 // PPU-derived timing lands when the PPU lands.
 static constexpr Cycle kFrameCycles = 1'120'380;
 
-NDS::NDS() {
+NDS::NDS()
+    : arm9_bus_(*this, main_ram_.data(), shared_wram_.data(), wram_ctl_) {
     reset();
 }
 
@@ -19,6 +20,9 @@ void NDS::reset() {
     main_ram_.fill(0);
     shared_wram_.fill(0);
     arm7_wram_.fill(0);
+
+    wram_ctl_.reset();
+    arm9_bus_.reset();
 }
 
 void NDS::run_frame() {
@@ -46,5 +50,12 @@ void NDS::on_scheduler_event(const Event& ev) {
             break;
     }
 }
+
+u32 NDS::arm9_io_read32 (u32 /*addr*/) { return 0; }
+u16 NDS::arm9_io_read16 (u32 /*addr*/) { return 0; }
+u8  NDS::arm9_io_read8  (u32 /*addr*/) { return 0; }
+void NDS::arm9_io_write32(u32 /*addr*/, u32 /*value*/) {}
+void NDS::arm9_io_write16(u32 /*addr*/, u16 /*value*/) {}
+void NDS::arm9_io_write8 (u32 /*addr*/, u8  /*value*/) {}
 
 }  // namespace ds

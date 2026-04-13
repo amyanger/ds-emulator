@@ -1,5 +1,7 @@
 #pragma once
 
+#include "bus/arm9_bus.hpp"
+#include "bus/wram_control.hpp"
 #include "cpu/arm7/arm7.hpp"
 #include "cpu/arm9/arm9.hpp"
 #include "ds/common.hpp"
@@ -22,6 +24,16 @@ public:
     Scheduler& scheduler() { return scheduler_; }
     Arm9&      cpu9()      { return cpu9_; }
     Arm7&      cpu7()      { return cpu7_; }
+    Arm9Bus&   arm9_bus()  { return arm9_bus_; }
+
+    // ARM9 I/O dispatch. This slice only handles WRAMCNT (0x0400'0247);
+    // everything else reads as 0 and ignores writes. Task 5 wires WRAMCNT.
+    u32  arm9_io_read32 (u32 addr);
+    u16  arm9_io_read16 (u32 addr);
+    u8   arm9_io_read8  (u32 addr);
+    void arm9_io_write32(u32 addr, u32 value);
+    void arm9_io_write16(u32 addr, u16 value);
+    void arm9_io_write8 (u32 addr, u8  value);
 
 private:
     // Central dispatch for scheduler events — the only place EventKind values
@@ -42,6 +54,9 @@ private:
     std::array<u8, kMainRamBytes>    main_ram_{};
     std::array<u8, kSharedWramBytes> shared_wram_{};
     std::array<u8, kArm7WramBytes>   arm7_wram_{};
+
+    WramControl wram_ctl_{};
+    Arm9Bus     arm9_bus_;
 };
 
 }  // namespace ds

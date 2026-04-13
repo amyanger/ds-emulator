@@ -2,6 +2,7 @@
 # Anything under src/frontend/ is NOT in this target; see the subdir below.
 add_library(ds_core STATIC
     nds.cpp
+    bus/arm9_bus.cpp
     scheduler/scheduler.cpp
     cpu/arm9/arm9.cpp
     cpu/arm7/arm7.cpp
