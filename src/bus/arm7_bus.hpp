@@ -44,8 +44,8 @@ private:
     void slow_write8 (u32 addr, u8  value);
 
     // Resolve a 0x03xx'xxxx address to the backing pointer + mask for the
-    // current WRAMCNT state. Returns {nullptr, 0} is never produced — in
-    // mode 0 ARM7 sees its own WRAM mirror at 0x0300'0000, not unmapped.
+    // current WRAMCNT state. Always returns a non-null ptr — mode 0 gives
+    // ARM7 its own WRAM mirror at 0x0300'0000, not unmapped.
     PageEntry resolve_region3(u32 addr) const;
 
     NDS*               nds_         = nullptr;

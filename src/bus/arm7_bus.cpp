@@ -107,7 +107,7 @@ PageEntry Arm7Bus::resolve_region3(u32 addr) const {
         case 2: return PageEntry{shared_wram_ + 0x4000u,  0x0000'3FFFu};
         case 3: return PageEntry{shared_wram_,            0x0000'7FFFu};
     }
-    return PageEntry{};  // unreachable
+    __builtin_unreachable();
 }
 
 u32 Arm7Bus::slow_read32(u32 addr) {
