@@ -15,6 +15,10 @@ void NDS::reset() {
     cpu9_.reset();
     cpu7_.reset();
     frame_done_ = false;
+
+    main_ram_.fill(0);
+    shared_wram_.fill(0);
+    arm7_wram_.fill(0);
 }
 
 void NDS::run_frame() {

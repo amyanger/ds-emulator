@@ -6,6 +6,8 @@
 #include "scheduler/event.hpp"
 #include "scheduler/scheduler.hpp"
 
+#include <array>
+
 namespace ds {
 
 class NDS {
@@ -30,6 +32,16 @@ private:
     Arm9      cpu9_;
     Arm7      cpu7_;
     bool      frame_done_ = false;
+
+    // Physical memory owned by NDS. Sizes match real hardware; see design
+    // spec §4.1. Bus classes (slice 2) hold raw pointers into these arrays.
+    static constexpr std::size_t kMainRamBytes    = 4 * 1024 * 1024;  // 4 MB
+    static constexpr std::size_t kSharedWramBytes = 32 * 1024;        // 32 KB
+    static constexpr std::size_t kArm7WramBytes   = 64 * 1024;        // 64 KB
+
+    std::array<u8, kMainRamBytes>    main_ram_{};
+    std::array<u8, kSharedWramBytes> shared_wram_{};
+    std::array<u8, kArm7WramBytes>   arm7_wram_{};
 };
 
 }  // namespace ds
