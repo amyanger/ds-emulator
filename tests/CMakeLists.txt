@@ -7,6 +7,7 @@ function(add_ds_unit_test name)
     target_include_directories(${name} PRIVATE
         ${CMAKE_SOURCE_DIR}/include
         ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests/support
     )
     target_enable_warnings(${name})
     target_apple_silicon(${name})
