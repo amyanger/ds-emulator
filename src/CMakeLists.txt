@@ -7,6 +7,7 @@ add_library(ds_core STATIC
     scheduler/scheduler.cpp
     cpu/arm9/arm9.cpp
     cpu/arm7/arm7.cpp
+    cpu/arm7/arm7_decode.cpp
 )
 target_include_directories(ds_core
     PUBLIC  ${CMAKE_SOURCE_DIR}/include

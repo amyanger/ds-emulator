@@ -16,10 +16,9 @@ void Arm7::reset() {
 
 void Arm7::run_until(Cycle arm9_target) {
     const Cycle arm7_target = arm9_target / 2;
-    if (arm7_target > state_.cycles) {
-        state_.cycles = arm7_target;
+    while (state_.cycles < arm7_target) {
+        step_arm();
     }
-    // Task 4 replaces this body with a fetch/decode loop that calls step_arm().
 }
 
 }  // namespace ds
