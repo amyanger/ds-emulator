@@ -599,18 +599,26 @@ struct Event {
 };
 
 class Scheduler {
-    std::vector<Event> heap;    // min-heap by `when`
-    Cycle              now = 0;
-    uint64_t           next_id = 1;
+    std::vector<Event>          heap;       // min-heap by (when, id)
+    std::unordered_set<uint64_t> cancelled; // tombstones
+    Cycle                       now = 0;
+    uint64_t                    next_id = 1;
 public:
-    uint64_t schedule_in(Cycle delta, uint32_t kind, uint64_t payload = 0);
-    uint64_t schedule_at(Cycle when,  uint32_t kind, uint64_t payload = 0);
+    uint64_t schedule_in(Cycle delta, EventKind kind, uint64_t payload = 0);
+    uint64_t schedule_at(Cycle when,  EventKind kind, uint64_t payload = 0);
     void     cancel(uint64_t id);
-    Cycle    peek_next() const;
-    void     advance_to(Cycle target);
-    void     fire(const Event&);
+    Cycle    now() const;
+    void     set_now(Cycle t);
+    Cycle    peek_next();                         // kNoEvent if empty
+    bool     pop_due(Cycle target, Event& out);   // pops one due event
 };
 ```
+
+> The scheduler is a pure data structure. It has no reference to `NDS`, no
+> callback, and no dispatch switch. Event handling lives in
+> `NDS::on_scheduler_event`, called from the inner drain loop of
+> `NDS::run_frame`. This keeps the scheduler trivially unit-testable and
+> preserves rule #3 (no subsystem points back at another subsystem).
 
 Flat `std::vector` maintained as a min-heap via `std::push_heap` /
 `std::pop_heap`. **Not `std::priority_queue`** — that hides the underlying
@@ -631,7 +639,9 @@ Typical steady-state size is 0-3. Standard technique.
 
 ### 9.4 Event kinds
 
-A single enum, dispatched via one switch in `scheduler.cpp`:
+A single enum, dispatched via one switch in `nds.cpp::on_scheduler_event`.
+The scheduler itself never sees `EventKind` as anything other than an
+opaque ordering key.
 
 ```
 FrameEnd,
