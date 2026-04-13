@@ -432,18 +432,19 @@ void Arm9Bus::reset() {
 }
 
 void Arm9Bus::rebuild_shared_wram() {
-    // WRAMCNT from ARM9's point of view:
+    // WRAMCNT from ARM9's point of view (verified against melonDS
+    // src/NDS.cpp::MapSharedWRAM):
     //   0: 32 KB mapped, mirrored across 0x03xx'xxxx
-    //   1: low  16 KB mapped, mirrored across 0x03xx'xxxx
-    //   2: high 16 KB mapped, mirrored across 0x03xx'xxxx
+    //   1: second 16 KB (offset 0x4000) mapped, mirrored
+    //   2: first  16 KB (offset 0x0000) mapped, mirrored
     //   3: unmapped — reads return 0 (open bus), writes ignored
     const u8 mode = wram_ctl_->value();
     PageEntry entry{};
     switch (mode) {
-        case 0: entry = PageEntry{shared_wram_,              0x0000'7FFFu}; break;
-        case 1: entry = PageEntry{shared_wram_,              0x0000'3FFFu}; break;
-        case 2: entry = PageEntry{shared_wram_ + 0x4000u,    0x0000'3FFFu}; break;
-        case 3: entry = PageEntry{nullptr,                   0};            break;
+        case 0: entry = PageEntry{shared_wram_,           0x0000'7FFFu}; break;
+        case 1: entry = PageEntry{shared_wram_ + 0x4000u, 0x0000'3FFFu}; break;
+        case 2: entry = PageEntry{shared_wram_,           0x0000'3FFFu}; break;
+        case 3: entry = PageEntry{nullptr,                0};            break;
     }
     table_.read [kRegionSharedWram] = entry;
     table_.write[kRegionSharedWram] = entry;
@@ -903,16 +904,18 @@ PageEntry Arm7Bus::resolve_region3(u32 addr) const {
     if (addr & 0x0080'0000u) {
         return PageEntry{arm7_wram_, kArm7WramMask};
     }
-    // 0x0300'0000-0x037F'FFFF depends on WRAMCNT.
+    // 0x0300'0000-0x037F'FFFF depends on WRAMCNT. Verified against
+    // melonDS src/NDS.cpp::MapSharedWRAM — ARM7's slice is the complement
+    // of ARM9's.
     //   0: ARM7 sees ARM7 WRAM mirror (no shared-WRAM access)
-    //   1: ARM7 sees shared WRAM high 16 KB (mirror)
-    //   2: ARM7 sees shared WRAM low  16 KB (mirror)
+    //   1: ARM7 sees shared WRAM first  16 KB (offset 0x0000)
+    //   2: ARM7 sees shared WRAM second 16 KB (offset 0x4000)
     //   3: ARM7 sees full 32 KB shared WRAM (mirror)
     const u8 mode = wram_ctl_->value();
     switch (mode) {
         case 0: return PageEntry{arm7_wram_,              kArm7WramMask};
-        case 1: return PageEntry{shared_wram_ + 0x4000u,  0x0000'3FFFu};
-        case 2: return PageEntry{shared_wram_,            0x0000'3FFFu};
+        case 1: return PageEntry{shared_wram_,            0x0000'3FFFu};
+        case 2: return PageEntry{shared_wram_ + 0x4000u,  0x0000'3FFFu};
         case 3: return PageEntry{shared_wram_,            0x0000'7FFFu};
     }
     return PageEntry{};  // unreachable
@@ -1204,13 +1207,13 @@ static void mode_0_arm9_has_full_32k_arm7_sees_private() {
     REQUIRE(nds.arm7_bus().read32(0x0300'0000) == 0);
 }
 
-static void mode_1_splits_16k_16k_low_to_arm9_high_to_arm7() {
+static void mode_1_splits_16k_16k_high_to_arm9_low_to_arm7() {
     NDS nds;
     set_wramcnt(nds, 1);
 
-    // ARM9 writes land in the low 16 KB of shared WRAM.
+    // Mode 1 (verified against melonDS): ARM9 sees the second 16 KB
+    // (offset 0x4000), ARM7 sees the first 16 KB (offset 0x0000).
     nds.arm9_bus().write32(0x0300'0000, 0x1111'1111u);
-    // ARM7 writes land in the high 16 KB (offset 0x4000).
     nds.arm7_bus().write32(0x0300'0000, 0x2222'2222u);
 
     // ARM9 reads back its own 16 KB slice, mirrored across region 3.
@@ -1221,18 +1224,21 @@ static void mode_1_splits_16k_16k_low_to_arm9_high_to_arm7() {
     REQUIRE(nds.arm7_bus().read32(0x0300'4000) == 0x2222'2222u);  // 16 KB mirror
 }
 
-static void mode_2_splits_16k_16k_high_to_arm9_low_to_arm7() {
+static void mode_2_splits_16k_16k_low_to_arm9_high_to_arm7() {
     NDS nds;
     set_wramcnt(nds, 2);
 
+    // Mode 2: ARM9 sees the first 16 KB (offset 0x0000), ARM7 sees the
+    // second 16 KB (offset 0x4000).
     nds.arm9_bus().write32(0x0300'0000, 0x3333'3333u);
     nds.arm7_bus().write32(0x0300'0000, 0x4444'4444u);
 
     REQUIRE(nds.arm9_bus().read32(0x0300'0000) == 0x3333'3333u);
     REQUIRE(nds.arm7_bus().read32(0x0300'0000) == 0x4444'4444u);
 
-    // Cross-check: ARM9's high 16 KB is the same physical bytes as ARM7's
-    // view under mode 1. Switch to mode 1 and ARM7 should see 0x33333333.
+    // Cross-check: ARM9's mode-2 slice (first 16 KB, offset 0x0000) is
+    // the same physical bytes as ARM7's mode-1 slice. Switch to mode 1
+    // and ARM7 should see 0x33333333.
     set_wramcnt(nds, 1);
     REQUIRE(nds.arm7_bus().read32(0x0300'0000) == 0x3333'3333u);
 }
