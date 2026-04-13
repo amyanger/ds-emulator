@@ -19,6 +19,10 @@ EventId Scheduler::schedule_at(Cycle when, EventKind kind, u64 payload) {
     return id;
 }
 
+void Scheduler::cancel(EventId id) {
+    cancelled_.insert(id);
+}
+
 void Scheduler::set_now(Cycle t) {
     assert(t >= now_ && "Scheduler::set_now is monotonic");
     now_ = t;

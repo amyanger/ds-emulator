@@ -44,10 +44,40 @@ static void test_same_cycle_fifo() {
     REQUIRE(ev.payload == 0xBB);
 }
 
+static void test_cancel_head() {
+    Scheduler s;
+    const EventId a = s.schedule_at(50,  EventKind::FrameEnd, 0xAA);
+    s.cancel(a);
+    s.schedule_at(100, EventKind::FrameEnd, 0xBB);
+
+    Event ev{};
+    REQUIRE(s.pop_due(Scheduler::kNoEvent, ev));
+    REQUIRE(ev.when == 100);
+    REQUIRE(ev.payload == 0xBB);
+    REQUIRE(!s.pop_due(Scheduler::kNoEvent, ev));
+}
+
+static void test_cancel_mid_heap() {
+    Scheduler s;
+    s.schedule_at(50,  EventKind::FrameEnd, 0xAA);
+    const EventId b = s.schedule_at(100, EventKind::FrameEnd, 0xBB);
+    s.schedule_at(150, EventKind::FrameEnd, 0xCC);
+    s.cancel(b);
+
+    Event ev{};
+    REQUIRE(s.pop_due(Scheduler::kNoEvent, ev));
+    REQUIRE(ev.payload == 0xAA);
+    REQUIRE(s.pop_due(Scheduler::kNoEvent, ev));
+    REQUIRE(ev.payload == 0xCC);  // B was tombstoned; skipped silently
+    REQUIRE(!s.pop_due(Scheduler::kNoEvent, ev));
+}
+
 int main() {
     test_basic_schedule_peek();
     test_pop_order();
     test_same_cycle_fifo();
+    test_cancel_head();
+    test_cancel_mid_heap();
     std::printf("scheduler_test: all passed\n");
     return 0;
 }
