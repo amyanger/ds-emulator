@@ -9,6 +9,10 @@ static constexpr Cycle kFrameCycles = 1'120'380;
 NDS::NDS()
     : arm9_bus_(*this, main_ram_.data(), shared_wram_.data(), wram_ctl_),
       arm7_bus_(*this, main_ram_.data(), shared_wram_.data(), arm7_wram_.data(), wram_ctl_) {
+    // attach_bus() must precede reset(): reset() cascades into cpu7_.reset(),
+    // which in later slices will touch bus_ for cart-header reads during
+    // direct boot. Do not reorder these calls, and do not sink reset() into
+    // a default member initializer.
     cpu7_.attach_bus(arm7_bus_);
     reset();
 }
