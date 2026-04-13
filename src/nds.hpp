@@ -28,9 +28,9 @@ public:
     Arm9Bus&   arm9_bus()  { return arm9_bus_; }
     Arm7Bus&   arm7_bus()  { return arm7_bus_; }
 
-    // ARM9 I/O dispatch. All methods are stubs in this slice (return 0 /
-    // ignore writes). The real WRAMCNT handler at 0x0400'0247 lands in a
-    // later slice-2 task.
+    // ARM9 I/O dispatch. Only arm9_io_write8 handles a real register in
+    // this slice — WRAMCNT at 0x0400'0247. All other I/O reads return 0
+    // and writes are ignored until later slices wire more registers.
     u32  arm9_io_read32 (u32 addr);
     u16  arm9_io_read16 (u32 addr);
     u8   arm9_io_read8  (u32 addr);
