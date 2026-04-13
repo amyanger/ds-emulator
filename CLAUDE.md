@@ -9,6 +9,12 @@ support for Apple Silicon macOS, portable by default.
 this is the source of truth for the architecture. Read it before making any
 non-trivial change.
 
+**Status:** Phase 0 (scaffolding). This document describes the *target*
+architecture from the design spec. Most subsystems, CLI flags, and debug
+keys below are not yet implemented — treat this file as a forward-looking
+map, not a description of current code. Check `src/CMakeLists.txt` for
+what actually builds today.
+
 ---
 
 ## Build & Run
@@ -34,7 +40,8 @@ mkdir -p build && cd build && cmake .. -DENABLE_XRAY=OFF && make
 ./ds_emulator <rom.nds> --headless --frames 600 --dump-hash out.txt
 
 # Unit tests (no SDL, runs in milliseconds)
-cd build && make ds_tests && ./ds_tests
+cd build && ctest --output-on-failure
+# or run a single test binary directly, e.g. ./tests/fixed_test
 
 # Clean rebuild
 rm -rf build && mkdir build && cd build && cmake .. && make
@@ -255,7 +262,8 @@ libds_core.a       Everything under src/ except frontend/ and main.cpp.
                    Zero SDL2 dependency. Platform-free.
 libds_frontend.a   src/frontend/. SDL2 lives here and nowhere else.
 ds_emulator        main.cpp + ds_frontend + ds_core.
-ds_tests           tests/ + ds_core only. No SDL.
+tests/*            One binary per unit test file, linked against ds_core
+                   only. No SDL. Run via `ctest` from the build dir.
 ```
 
 ---
@@ -400,14 +408,21 @@ GBATEK when implementing.
 
 ## Testing
 
-### Unit tests (`ds_tests`)
+### Unit tests
+
+Current:
 - `fixed_test.cpp` — `Fixed<I, F>` arithmetic.
+- `ring_buffer_test.cpp` — `CircularBuffer<T, N>` behavior.
+
+Planned (add as subsystems land):
 - `scheduler_test.cpp` — min-heap, cancellation, same-cycle ordering.
 - `clipper_test.cpp` — frustum clip of degenerate cases.
 - `vram_controller_test.cpp` — bank remapping on every `VRAMCNT` variant.
 
-Linked against `ds_core` only, runs in milliseconds, no SDL, no window. Add
-tests here for anything purely computational with a clean interface.
+Each test file compiles to its own binary and registers via `add_test()`.
+Linked against `ds_core` only, runs in milliseconds, no SDL, no window.
+Run with `ctest --output-on-failure` from the build dir. Add new tests via
+`add_ds_unit_test(name)` in `tests/CMakeLists.txt`.
 
 ### Regression tests (Phase 6+)
 Headless harness: `./ds_emulator --headless --frames N --dump-hash out.txt`
