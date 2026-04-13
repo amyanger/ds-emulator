@@ -102,44 +102,116 @@ u32 dispatch_arm(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
     const u32 s_flag = (instr >> 20) & 1u;
     const u32 rn     = (instr >> 16) & 0xFu;
     const u32 rd     = (instr >> 12) & 0xFu;
-    (void)s_flag;  // Task 6 wires this in.
 
     const u32 rn_val = state.r[rn];
+
+    // Per-opcode products consumed by the flag-update block below.
+    u32  result       = 0;
+    bool logical_form = true;   // true → C from shifter (op2.carry), V unchanged
+    bool writeback    = true;   // false for TST/TEQ/CMP/CMN
+    AddResult ar { 0, false, false };  // only meaningful when !logical_form
+
     switch (static_cast<DpOp>(opcode)) {
-        case DpOp::AND: write_rd(state, rd, rn_val & op2.value); break;
-        case DpOp::EOR: write_rd(state, rd, rn_val ^ op2.value); break;
-        case DpOp::SUB: write_rd(state, rd, rn_val - op2.value); break;
-        case DpOp::RSB: write_rd(state, rd, op2.value - rn_val); break;
-        case DpOp::ADD: write_rd(state, rd, rn_val + op2.value); break;
+        case DpOp::AND:
+            result = rn_val & op2.value;
+            break;
+        case DpOp::EOR:
+            result = rn_val ^ op2.value;
+            break;
+        case DpOp::SUB:
+            ar = sbc(rn_val, op2.value, true);
+            result = ar.value;
+            logical_form = false;
+            break;
+        case DpOp::RSB:
+            ar = sbc(op2.value, rn_val, true);
+            result = ar.value;
+            logical_form = false;
+            break;
+        case DpOp::ADD:
+            ar = adc(rn_val, op2.value, false);
+            result = ar.value;
+            logical_form = false;
+            break;
         case DpOp::ADC: {
             const bool c = (state.cpsr & (1u << 29)) != 0;
-            write_rd(state, rd, rn_val + op2.value + (c ? 1u : 0u));
+            ar = adc(rn_val, op2.value, c);
+            result = ar.value;
+            logical_form = false;
             break;
         }
         case DpOp::SBC: {
             const bool c = (state.cpsr & (1u << 29)) != 0;
-            write_rd(state, rd, rn_val - op2.value - (c ? 0u : 1u));
+            ar = sbc(rn_val, op2.value, c);
+            result = ar.value;
+            logical_form = false;
             break;
         }
         case DpOp::RSC: {
             const bool c = (state.cpsr & (1u << 29)) != 0;
-            write_rd(state, rd, op2.value - rn_val - (c ? 0u : 1u));
+            ar = sbc(op2.value, rn_val, c);
+            result = ar.value;
+            logical_form = false;
             break;
         }
-        case DpOp::ORR: write_rd(state, rd, rn_val | op2.value); break;
-        case DpOp::MOV: write_rd(state, rd, op2.value);          break;
-        case DpOp::BIC: write_rd(state, rd, rn_val & ~op2.value); break;
-        case DpOp::MVN: write_rd(state, rd, ~op2.value);          break;
-        // TST/TEQ/CMP/CMN land in Task 6 with S-flag handling; they
-        // only exist in their flag-setting form so there is nothing to
-        // do here until the flag path is in place.
-        case DpOp::TST:
-        case DpOp::TEQ:
-        case DpOp::CMP:
-        case DpOp::CMN:
-            DS_LOG_WARN("arm7: TST/TEQ/CMP/CMN at 0x%08X - Task 6",
-                        instr_addr);
+        case DpOp::ORR:
+            result = rn_val | op2.value;
             break;
+        case DpOp::MOV:
+            result = op2.value;
+            break;
+        case DpOp::BIC:
+            result = rn_val & ~op2.value;
+            break;
+        case DpOp::MVN:
+            result = ~op2.value;
+            break;
+        // Compare-only opcodes: compute result, update flags, no writeback.
+        // Real ARMv4T only encodes these with S=1; S=0 here would be MRS/MSR
+        // which is deferred to slice 3b. Slice 3a unconditionally treats
+        // them as flag-setting.
+        case DpOp::TST:
+            result = rn_val & op2.value;
+            writeback = false;
+            break;
+        case DpOp::TEQ:
+            result = rn_val ^ op2.value;
+            writeback = false;
+            break;
+        case DpOp::CMP:
+            ar = sbc(rn_val, op2.value, true);
+            result = ar.value;
+            logical_form = false;
+            writeback = false;
+            break;
+        case DpOp::CMN:
+            ar = adc(rn_val, op2.value, false);
+            result = ar.value;
+            logical_form = false;
+            writeback = false;
+            break;
+    }
+
+    if (writeback) {
+        write_rd(state, rd, result);
+    }
+
+    if (s_flag) {
+        if (rd == 15 && writeback) {
+            // MOVS PC, ... / equivalent — real ARMv4T copies SPSR of the
+            // current mode into CPSR as the canonical exception-return
+            // pattern. Slice 3a has no exceptions; slice 3d replaces this
+            // stub. Fall through as a plain PC write with NZCV untouched.
+            DS_LOG_WARN("arm7: S-flag set with Rd=R15 at 0x%08X", instr_addr);
+        } else {
+            state.cpsr = set_nz(state.cpsr, result);
+            if (logical_form) {
+                state.cpsr = set_c(state.cpsr, op2.carry);
+            } else {
+                state.cpsr = set_c(state.cpsr, ar.carry);
+                state.cpsr = set_v(state.cpsr, ar.overflow);
+            }
+        }
     }
 
     return 1;
