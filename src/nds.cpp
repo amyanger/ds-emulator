@@ -9,6 +9,7 @@ static constexpr Cycle kFrameCycles = 1'120'380;
 NDS::NDS()
     : arm9_bus_(*this, main_ram_.data(), shared_wram_.data(), wram_ctl_),
       arm7_bus_(*this, main_ram_.data(), shared_wram_.data(), arm7_wram_.data(), wram_ctl_) {
+    cpu7_.attach_bus(arm7_bus_);
     reset();
 }
 
