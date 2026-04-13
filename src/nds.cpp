@@ -58,7 +58,15 @@ u16 NDS::arm9_io_read16 (u32 /*addr*/) { return 0; }
 u8  NDS::arm9_io_read8  (u32 /*addr*/) { return 0; }
 void NDS::arm9_io_write32(u32 /*addr*/, u32 /*value*/) {}
 void NDS::arm9_io_write16(u32 /*addr*/, u16 /*value*/) {}
-void NDS::arm9_io_write8 (u32 /*addr*/, u8  /*value*/) {}
+void NDS::arm9_io_write8(u32 addr, u8 value) {
+    // WRAMCNT is the only I/O register handled in slice 2. Everything else
+    // is an accepted no-op until later slices wire the remaining I/O.
+    if (addr == 0x0400'0247u) {
+        wram_ctl_.write(value);
+        arm9_bus_.rebuild_shared_wram();
+        arm7_bus_.rebuild_shared_wram();
+    }
+}
 
 u32 NDS::arm7_io_read32 (u32 /*addr*/) { return 0; }
 u16 NDS::arm7_io_read16 (u32 /*addr*/) { return 0; }
