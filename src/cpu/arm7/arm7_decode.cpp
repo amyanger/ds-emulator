@@ -34,13 +34,10 @@ enum class DpOp : u8 {
     ORR = 0xC, MOV = 0xD, BIC = 0xE, MVN = 0xF,
 };
 
-// Task 5 completes the non-compare data-processing executors
-// (AND/EOR/SUB/RSB/ADD/ADC/SBC/RSC/ORR/BIC/MOV/MVN). Task 6 adds the
-// S-flag path and the four compare-only opcodes (TST/TEQ/CMP/CMN).
-// Task 7 wires the immediate-shifted register operand2.
-//
-// `write_rd` is the single writeback point so a future Task 6 can swap
-// in flag-setting without touching every opcode branch.
+// Single register-file writeback point. The post-switch block in
+// dispatch_arm calls this when writeback == true; flag-only opcodes
+// (TST/TEQ/CMP/CMN) skip it. R15 writes are masked to ARM alignment
+// and also stomp state.pc so the next fetch lands on the target.
 void write_rd(Arm7State& s, u32 rd, u32 value) {
     s.r[rd] = value;
     if (rd == 15) {
@@ -98,10 +95,10 @@ u32 dispatch_arm(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
         return 1;
     }
 
-    const u32 opcode = (instr >> 21) & 0xFu;
-    const u32 s_flag = (instr >> 20) & 1u;
-    const u32 rn     = (instr >> 16) & 0xFu;
-    const u32 rd     = (instr >> 12) & 0xFu;
+    const u32  opcode = (instr >> 21) & 0xFu;
+    const bool s_flag = ((instr >> 20) & 1u) != 0;
+    const u32  rn     = (instr >> 16) & 0xFu;
+    const u32  rd     = (instr >> 12) & 0xFu;
 
     const u32 rn_val = state.r[rn];
 
@@ -198,10 +195,12 @@ u32 dispatch_arm(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
 
     if (s_flag) {
         if (rd == 15 && writeback) {
-            // MOVS PC, ... / equivalent — real ARMv4T copies SPSR of the
-            // current mode into CPSR as the canonical exception-return
-            // pattern. Slice 3a has no exceptions; slice 3d replaces this
-            // stub. Fall through as a plain PC write with NZCV untouched.
+            // Slice 3a stub: PC was already written by write_rd() above.
+            // NZCV are left entirely untouched (whatever the previous op
+            // set stays set). Slice 3d's real path copies SPSR->CPSR,
+            // which is what a game-visible exception return would see.
+            // Until then, a test relying on post-MOVS-PC flag state is
+            // an emulator bug.
             DS_LOG_WARN("arm7: S-flag set with Rd=R15 at 0x%08X", instr_addr);
         } else {
             state.cpsr = set_nz(state.cpsr, result);

@@ -29,6 +29,7 @@ static void run_one(NDS& nds, u32 pc, u32 instr) {
 
 static void movs_imm_zero_sets_z_clears_n() {
     NDS nds;
+    nds.cpu7().state().cpsr |= N_BIT;  // prove MOVS CLEARED N, not left alone
     // MOVS R0, #0 -> 0xE3B0'0000 (S-bit set on MOV imm).
     run_one(nds, 0x0380'0000u, 0xE3B0'0000u);
     REQUIRE(nds.cpu7().state().r[0] == 0u);
@@ -38,11 +39,23 @@ static void movs_imm_zero_sets_z_clears_n() {
 
 static void movs_imm_negative_sets_n_clears_z() {
     NDS nds;
+    nds.cpu7().state().cpsr |= Z_BIT;  // prove MVNS CLEARED Z
     // MVNS R0, #0 -> 0xE3F0'0000 (MVN with S-bit, result=0xFFFFFFFF).
     run_one(nds, 0x0380'0000u, 0xE3F0'0000u);
     REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'FFFFu);
     REQUIRE((nds.cpu7().state().cpsr & N_BIT) != 0);
     REQUIRE((nds.cpu7().state().cpsr & Z_BIT) == 0);
+}
+
+static void ands_leaves_v_unchanged() {
+    NDS nds;
+    nds.cpu7().state().cpsr |= V_BIT;  // seed V=1 so we can detect clobber
+    nds.cpu7().state().r[1] = 0xFF00'FF00u;
+    // ANDS R0, R1, #0xFF -> 0xE211'00FF (result = 0)
+    run_one(nds, 0x0380'0000u, 0xE211'00FFu);
+    REQUIRE(nds.cpu7().state().r[0] == 0u);
+    REQUIRE((nds.cpu7().state().cpsr & Z_BIT) != 0);
+    REQUIRE((nds.cpu7().state().cpsr & V_BIT) != 0);  // untouched by logical op
 }
 
 static void adds_overflow_sets_v() {
@@ -120,6 +133,7 @@ static void tst_sets_nz_from_and_but_no_register_write() {
 int main() {
     movs_imm_zero_sets_z_clears_n();
     movs_imm_negative_sets_n_clears_z();
+    ands_leaves_v_unchanged();
     adds_overflow_sets_v();
     adds_wrap_sets_c_no_v();
     subs_sets_c_when_no_borrow();
