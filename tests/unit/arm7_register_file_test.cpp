@@ -44,6 +44,32 @@ static void r13_r14_are_banked_between_svc_and_irq() {
     REQUIRE(s.r[14] == 0x0800'1234u);
 }
 
+static void reset_loads_svc_bank_before_first_switch() {
+    // Regression for Fix 1: reset() must establish the invariant that
+    // r[13..14] reflects banks[current_mode] from cycle zero. After
+    // reset(), CPSR says SVC, so r[13]/r[14] must equal banks.svc_r13_r14.
+    // Without Fix 1, reset() left r[13]/r[14] zero but never called
+    // load_banked_registers, so the asymmetry would bite the moment a
+    // later slice gives reset() non-zero defaults: the first switch_mode
+    // out of SVC would store stale r[13]/r[14] over the SVC bank values.
+    Arm7State s;
+    s.reset();
+    REQUIRE(s.current_mode() == Mode::Supervisor);
+    REQUIRE(s.r[13] == s.banks.svc_r13_r14[0]);
+    REQUIRE(s.r[14] == s.banks.svc_r13_r14[1]);
+
+    // Round-trip: write SVC sp/lr through the visible registers (the
+    // intended pattern), bounce through IRQ, and verify we come back
+    // with the same values — the post-reset invariant is preserved
+    // through a mode switch, not just at t=0.
+    s.r[13] = 0x0380'FF80u;
+    s.r[14] = 0xDEAD'BEEFu;
+    s.switch_mode(Mode::Irq);
+    s.switch_mode(Mode::Supervisor);
+    REQUIRE(s.r[13] == 0x0380'FF80u);
+    REQUIRE(s.r[14] == 0xDEAD'BEEFu);
+}
+
 static void fiq_banks_r8_through_r14() {
     Arm7State s;
     s.reset();
@@ -71,6 +97,7 @@ int main() {
     reset_defaults_to_svc_with_irqs_disabled();
     non_banked_registers_are_visible_across_modes();
     r13_r14_are_banked_between_svc_and_irq();
+    reset_loads_svc_bank_before_first_switch();
     fiq_banks_r8_through_r14();
     std::puts("arm7_register_file_test OK");
     return 0;

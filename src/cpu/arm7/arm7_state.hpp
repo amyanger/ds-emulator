@@ -7,6 +7,7 @@
 #include "ds/common.hpp"
 
 #include <array>
+#include <cassert>
 
 namespace ds {
 
@@ -72,7 +73,7 @@ struct Arm7State {
         cpsr = 0xD3;
         banks = {};
         cycles = 0;
-        r[15] = 0;
+        load_banked_registers(Mode::Supervisor);  // establishes the invariant
     }
 
     Mode current_mode() const {
@@ -118,6 +119,9 @@ private:
                 for (std::size_t i = 0; i < 5; ++i) banks.user_r8_r14[i] = r[8 + i];
                 banks.und_r13_r14[0] = r[13]; banks.und_r13_r14[1] = r[14];
                 break;
+            default:
+                assert(false && "Arm7State::switch_mode: invalid Mode value");
+                break;
         }
     }
 
@@ -148,6 +152,9 @@ private:
             case Mode::Undefined:
                 for (std::size_t i = 0; i < 5; ++i) r[8 + i] = banks.user_r8_r14[i];
                 r[13] = banks.und_r13_r14[0]; r[14] = banks.und_r13_r14[1];
+                break;
+            default:
+                assert(false && "Arm7State::switch_mode: invalid Mode value");
                 break;
         }
     }
