@@ -88,11 +88,17 @@ u32 dispatch_arm(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
         const bool c_in  = (state.cpsr & (1u << 29)) != 0;
         op2 = rotated_imm(imm8, rotate, c_in);
     } else {
-        // Immediate-shift form. Task 7 wires this in. Slice 3a only
-        // supports rotated-immediate operand2 right now.
-        DS_LOG_WARN("arm7: immediate-shift dp form 0x%08X at 0x%08X",
-                    instr, instr_addr);
-        return 1;
+        // Immediate-shifted register operand2. Rm==15 naturally reads
+        // state.r[15] == instr_addr + 8 (Task 4's pipeline model).
+        const u32  rm         = instr & 0xFu;
+        const u32  shift_type = (instr >> 5) & 0x3u;
+        const u32  shift_amt  = (instr >> 7) & 0x1Fu;
+        const bool c_in       = (state.cpsr & (1u << 29)) != 0;
+        op2 = barrel_shift_imm(
+            state.r[rm],
+            static_cast<ShiftType>(shift_type),
+            shift_amt,
+            c_in);
     }
 
     const u32  opcode = (instr >> 21) & 0xFu;

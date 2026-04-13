@@ -141,6 +141,56 @@ static void rsc_imm_with_carry_set() {
     REQUIRE(nds.cpu7().state().r[0] == 7u);
 }
 
+// --- Task 7: immediate-shifted register operand2 --------------------------
+
+static void mov_reg_no_shift() {
+    NDS nds;
+    nds.cpu7().state().r[2] = 0xDEAD'BEEFu;
+    // MOV R0, R2 -> 0xE1A0'0002 (LSL #0 = identity)
+    run_one(nds, 0x0380'0000u, 0xE1A0'0002u);
+    REQUIRE(nds.cpu7().state().r[0] == 0xDEAD'BEEFu);
+    REQUIRE(nds.cpu7().state().pc == 0x0380'0004u);
+}
+
+static void add_reg_lsl_3() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x100u;
+    nds.cpu7().state().r[2] = 0x2u;
+    // ADD R0, R1, R2, LSL #3 -> 0xE081'0182
+    // r2 << 3 = 0x10, r1 + 0x10 = 0x110
+    run_one(nds, 0x0380'0000u, 0xE081'0182u);
+    REQUIRE(nds.cpu7().state().r[0] == 0x110u);
+}
+
+static void sub_reg_lsr_1() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x20u;
+    nds.cpu7().state().r[2] = 0x10u;
+    // SUB R0, R1, R2, LSR #1 -> 0xE041'00A2
+    // r2 >> 1 = 0x8, r1 - 0x8 = 0x18
+    run_one(nds, 0x0380'0000u, 0xE041'00A2u);
+    REQUIRE(nds.cpu7().state().r[0] == 0x18u);
+}
+
+static void mov_reg_asr_31_sign_extends() {
+    NDS nds;
+    nds.cpu7().state().r[2] = 0x8000'0000u;
+    // MOV R0, R2, ASR #31 -> 0xE1A0'0FC2
+    // ASR by 31 sign-extends top bit down -> 0xFFFFFFFF
+    run_one(nds, 0x0380'0000u, 0xE1A0'0FC2u);
+    REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'FFFFu);
+}
+
+static void mov_reg_to_pc_stomps_pc() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x0380'0000u;
+    // MOV R15, R1 -> 0xE1A0'F001
+    // write_rd masks ~0x3 and stomps state.pc — 0x0380'0000 is already aligned.
+    run_one(nds, 0x0380'0000u, 0xE1A0'F001u);
+    REQUIRE(nds.cpu7().state().r[15] == 0x0380'0000u);
+    REQUIRE(nds.cpu7().state().pc == 0x0380'0000u);
+}
+
 int main() {
     mov_imm_zero_writes_register_and_advances_pc();
     mov_imm_0x42_lands_in_r1();
@@ -150,6 +200,11 @@ int main() {
     adc_imm_with_carry_set();
     sbc_imm_with_carry_clear();
     rsc_imm_with_carry_set();
+    mov_reg_no_shift();
+    add_reg_lsl_3();
+    sub_reg_lsr_1();
+    mov_reg_asr_31_sign_extends();
+    mov_reg_to_pc_stomps_pc();
     std::puts("arm7_data_processing_test OK");
     return 0;
 }
