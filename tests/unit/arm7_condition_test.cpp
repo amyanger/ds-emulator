@@ -62,6 +62,46 @@ static void hi_ls_compound() {
     REQUIRE(eval_condition(0x9, 0)                          == true);
 }
 
+static void set_nz_sets_n_and_z_and_leaves_c_v_alone() {
+    // Start with C and V set but N and Z clear.
+    u32 cpsr = flag(C_BIT) | flag(V_BIT);
+    cpsr = set_nz(cpsr, 0u);  // result == 0 → Z=1, N=0
+    REQUIRE((cpsr & flag(Z_BIT)) != 0);
+    REQUIRE((cpsr & flag(N_BIT)) == 0);
+    REQUIRE((cpsr & flag(C_BIT)) != 0);  // unchanged
+    REQUIRE((cpsr & flag(V_BIT)) != 0);  // unchanged
+
+    cpsr = set_nz(cpsr, 0x8000'0000u);   // bit 31 set → N=1, Z=0
+    REQUIRE((cpsr & flag(N_BIT)) != 0);
+    REQUIRE((cpsr & flag(Z_BIT)) == 0);
+    REQUIRE((cpsr & flag(C_BIT)) != 0);  // still unchanged
+    REQUIRE((cpsr & flag(V_BIT)) != 0);
+}
+
+static void set_c_toggles_only_c() {
+    u32 cpsr = flag(N_BIT) | flag(Z_BIT) | flag(V_BIT);
+    cpsr = set_c(cpsr, true);
+    REQUIRE((cpsr & flag(C_BIT)) != 0);
+    REQUIRE((cpsr & flag(N_BIT)) != 0);  // unchanged
+    REQUIRE((cpsr & flag(Z_BIT)) != 0);
+    REQUIRE((cpsr & flag(V_BIT)) != 0);
+    cpsr = set_c(cpsr, false);
+    REQUIRE((cpsr & flag(C_BIT)) == 0);
+    REQUIRE((cpsr & flag(N_BIT)) != 0);  // still unchanged
+}
+
+static void set_v_toggles_only_v() {
+    u32 cpsr = flag(N_BIT) | flag(Z_BIT) | flag(C_BIT);
+    cpsr = set_v(cpsr, true);
+    REQUIRE((cpsr & flag(V_BIT)) != 0);
+    REQUIRE((cpsr & flag(N_BIT)) != 0);
+    REQUIRE((cpsr & flag(Z_BIT)) != 0);
+    REQUIRE((cpsr & flag(C_BIT)) != 0);
+    cpsr = set_v(cpsr, false);
+    REQUIRE((cpsr & flag(V_BIT)) == 0);
+    REQUIRE((cpsr & flag(C_BIT)) != 0);
+}
+
 static void ge_lt_gt_le_track_nv() {
     // N=V → GE true, LT false.
     REQUIRE(eval_condition(0xA, 0) == true);
@@ -87,6 +127,9 @@ int main() {
     mi_pl_track_n();
     vs_vc_track_v();
     hi_ls_compound();
+    set_nz_sets_n_and_z_and_leaves_c_v_alone();
+    set_c_toggles_only_c();
+    set_v_toggles_only_v();
     ge_lt_gt_le_track_nv();
     std::puts("arm7_condition_test OK");
     return 0;

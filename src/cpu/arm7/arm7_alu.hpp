@@ -59,9 +59,8 @@ inline ShifterResult barrel_shift_imm(u32 operand, ShiftType type, u32 amount, b
             return { static_cast<u32>(signed_op >> amount), carry };
         }
         case ShiftType::Ror: {
-            const u32 a = amount & 31u;
-            const bool carry = ((operand >> (a - 1u)) & 1u) != 0;
-            return { (operand >> a) | (operand << (32u - a)), carry };
+            const bool carry = ((operand >> (amount - 1u)) & 1u) != 0;
+            return { (operand >> amount) | (operand << (32u - amount)), carry };
         }
     }
     return { operand, c_in };  // unreachable
@@ -73,9 +72,11 @@ inline ShifterResult barrel_shift_imm(u32 operand, ShiftType type, u32 amount, b
 // ROR by N>32 folds to ROR(N mod 32).
 inline ShifterResult barrel_shift_reg(u32 operand, ShiftType type, u32 amount) {
     if (amount == 0) {
-        // LSL/LSR/ASR/ROR by zero from a register leaves value and carry
-        // unchanged. Callers that need the "c_in" value must pass it
-        // through themselves because this helper does not know it.
+        // WARNING: when amount == 0, the returned `carry` is MEANINGLESS.
+        // ARMv4T leaves CPSR.C unchanged on a register-shift with
+        // Rs[7:0]==0, so the caller MUST read its own current C flag
+        // rather than `result.carry` in that case. This helper has no
+        // `c_in` parameter on purpose — to force callers to notice.
         return { operand, false };
     }
     if (amount >= 32) {
