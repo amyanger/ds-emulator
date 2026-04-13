@@ -34,14 +34,17 @@ enum class DpOp : u8 {
     ORR = 0xC, MOV = 0xD, BIC = 0xE, MVN = 0xF,
 };
 
-// Task 5 adds the remaining non-compare opcodes (AND/EOR/SUB/RSB/ADD/
-// ADC/SBC/RSC/ORR/BIC/MVN). Task 6 adds the S-flag path and the four
-// compare-only opcodes (TST/TEQ/CMP/CMN). Task 7 wires the immediate-
-// shifted register operand2.
-void exec_dp_mov(Arm7State& s, u32 rd, u32 operand2) {
-    s.r[rd] = operand2;
+// Task 5 completes the non-compare data-processing executors
+// (AND/EOR/SUB/RSB/ADD/ADC/SBC/RSC/ORR/BIC/MOV/MVN). Task 6 adds the
+// S-flag path and the four compare-only opcodes (TST/TEQ/CMP/CMN).
+// Task 7 wires the immediate-shifted register operand2.
+//
+// `write_rd` is the single writeback point so a future Task 6 can swap
+// in flag-setting without touching every opcode branch.
+void write_rd(Arm7State& s, u32 rd, u32 value) {
+    s.r[rd] = value;
     if (rd == 15) {
-        s.pc = operand2 & ~0x3u;
+        s.pc = value & ~0x3u;
     }
 }
 
@@ -99,16 +102,43 @@ u32 dispatch_arm(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
     const u32 s_flag = (instr >> 20) & 1u;
     const u32 rn     = (instr >> 16) & 0xFu;
     const u32 rd     = (instr >> 12) & 0xFu;
-    (void)rn;
     (void)s_flag;  // Task 6 wires this in.
 
+    const u32 rn_val = state.r[rn];
     switch (static_cast<DpOp>(opcode)) {
-        case DpOp::MOV:
-            exec_dp_mov(state, rd, op2.value);
+        case DpOp::AND: write_rd(state, rd, rn_val & op2.value); break;
+        case DpOp::EOR: write_rd(state, rd, rn_val ^ op2.value); break;
+        case DpOp::SUB: write_rd(state, rd, rn_val - op2.value); break;
+        case DpOp::RSB: write_rd(state, rd, op2.value - rn_val); break;
+        case DpOp::ADD: write_rd(state, rd, rn_val + op2.value); break;
+        case DpOp::ADC: {
+            const bool c = (state.cpsr & (1u << 29)) != 0;
+            write_rd(state, rd, rn_val + op2.value + (c ? 1u : 0u));
             break;
-        default:
-            DS_LOG_WARN("arm7: unimplemented dp opcode 0x%X at 0x%08X",
-                        opcode, instr_addr);
+        }
+        case DpOp::SBC: {
+            const bool c = (state.cpsr & (1u << 29)) != 0;
+            write_rd(state, rd, rn_val - op2.value - (c ? 0u : 1u));
+            break;
+        }
+        case DpOp::RSC: {
+            const bool c = (state.cpsr & (1u << 29)) != 0;
+            write_rd(state, rd, op2.value - rn_val - (c ? 0u : 1u));
+            break;
+        }
+        case DpOp::ORR: write_rd(state, rd, rn_val | op2.value); break;
+        case DpOp::MOV: write_rd(state, rd, op2.value);          break;
+        case DpOp::BIC: write_rd(state, rd, rn_val & ~op2.value); break;
+        case DpOp::MVN: write_rd(state, rd, ~op2.value);          break;
+        // TST/TEQ/CMP/CMN land in Task 6 with S-flag handling; they
+        // only exist in their flag-setting form so there is nothing to
+        // do here until the flag path is in place.
+        case DpOp::TST:
+        case DpOp::TEQ:
+        case DpOp::CMP:
+        case DpOp::CMN:
+            DS_LOG_WARN("arm7: TST/TEQ/CMP/CMN at 0x%08X - Task 6",
+                        instr_addr);
             break;
     }
 

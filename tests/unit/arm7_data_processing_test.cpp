@@ -51,10 +51,105 @@ static void condition_ne_skips_when_z_set() {
     REQUIRE(nds.cpu7().state().pc == 0x0380'0004u);  // still advances
 }
 
+static void add_imm() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 10;
+    // ADD R0, R1, #5 -> 0xE281'0005
+    run_one(nds, 0x0380'0000u, 0xE281'0005u);
+    REQUIRE(nds.cpu7().state().r[0] == 15u);
+}
+
+static void sub_imm() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 10;
+    // SUB R0, R1, #3 -> 0xE241'0003
+    run_one(nds, 0x0380'0000u, 0xE241'0003u);
+    REQUIRE(nds.cpu7().state().r[0] == 7u);
+}
+
+static void rsb_imm() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 3;
+    // RSB R0, R1, #10 -> 0xE261'000A
+    run_one(nds, 0x0380'0000u, 0xE261'000Au);
+    REQUIRE(nds.cpu7().state().r[0] == 7u);
+}
+
+static void and_imm() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0xF0F0'F0F0u;
+    // AND R0, R1, #0xFF -> 0xE201'00FF
+    run_one(nds, 0x0380'0000u, 0xE201'00FFu);
+    REQUIRE(nds.cpu7().state().r[0] == 0xF0u);
+}
+
+static void eor_imm() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0xFFFF'FFFFu;
+    // EOR R0, R1, #0xFF -> 0xE221'00FF
+    run_one(nds, 0x0380'0000u, 0xE221'00FFu);
+    REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'FF00u);
+}
+
+static void orr_imm() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x0000'000Fu;
+    // ORR R0, R1, #0xF0 -> 0xE381'00F0
+    run_one(nds, 0x0380'0000u, 0xE381'00F0u);
+    REQUIRE(nds.cpu7().state().r[0] == 0xFFu);
+}
+
+static void bic_imm() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0xFFu;
+    // BIC R0, R1, #0x0F -> 0xE3C1'000F
+    run_one(nds, 0x0380'0000u, 0xE3C1'000Fu);
+    REQUIRE(nds.cpu7().state().r[0] == 0xF0u);
+}
+
+static void mvn_imm() {
+    NDS nds;
+    // MVN R0, #0 -> 0xE3E0'0000 (result 0xFFFFFFFF)
+    run_one(nds, 0x0380'0000u, 0xE3E0'0000u);
+    REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'FFFFu);
+}
+
+static void adc_imm_with_carry_set() {
+    NDS nds;
+    nds.cpu7().state().cpsr |= (1u << 29);   // C = 1
+    nds.cpu7().state().r[1] = 10;
+    // ADC R0, R1, #5 -> 0xE2A1'0005
+    run_one(nds, 0x0380'0000u, 0xE2A1'0005u);
+    REQUIRE(nds.cpu7().state().r[0] == 16u);
+}
+
+static void sbc_imm_with_carry_clear() {
+    NDS nds;
+    // C = 0 means SBC subtracts an extra 1.
+    nds.cpu7().state().r[1] = 10;
+    // SBC R0, R1, #3 -> 0xE2C1'0003
+    run_one(nds, 0x0380'0000u, 0xE2C1'0003u);
+    REQUIRE(nds.cpu7().state().r[0] == 6u);
+}
+
+static void rsc_imm_with_carry_set() {
+    NDS nds;
+    nds.cpu7().state().cpsr |= (1u << 29);  // C = 1 -> no extra decrement
+    nds.cpu7().state().r[1] = 3;
+    // RSC R0, R1, #10 -> 0xE2E1'000A
+    run_one(nds, 0x0380'0000u, 0xE2E1'000Au);
+    REQUIRE(nds.cpu7().state().r[0] == 7u);
+}
+
 int main() {
     mov_imm_zero_writes_register_and_advances_pc();
     mov_imm_0x42_lands_in_r1();
     condition_ne_skips_when_z_set();
+    add_imm(); sub_imm(); rsb_imm();
+    and_imm(); eor_imm(); orr_imm(); bic_imm(); mvn_imm();
+    adc_imm_with_carry_set();
+    sbc_imm_with_carry_clear();
+    rsc_imm_with_carry_set();
     std::puts("arm7_data_processing_test OK");
     return 0;
 }
