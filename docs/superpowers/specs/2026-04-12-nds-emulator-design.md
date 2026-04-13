@@ -132,7 +132,10 @@ void NDS::run_frame() {
         // converts to ARM7 cycles (half-rate); see section 9.3.
         cpu9.run_until(next);
         cpu7.run_until(next);
-        scheduler.advance_to(next);  // fires every event due by `next`
+        scheduler.set_now(next);
+        // Fire any events whose when <= next.
+        Event ev;
+        while (scheduler.pop_due(next, ev)) on_event(ev);
     }
 }
 ```
@@ -600,7 +603,7 @@ struct Event {
 
 class Scheduler {
     std::vector<Event>          heap;       // min-heap by (when, id)
-    std::unordered_set<uint64_t> cancelled; // tombstones
+    std::unordered_set<uint64_t> cancelled_; // tombstones
     Cycle                       now = 0;
     uint64_t                    next_id = 1;
 public:
@@ -626,7 +629,7 @@ container and makes cancellation impossible.
 
 ### 9.2 Cancellation via tombstones
 
-`cancel(id)` marks the event id in a small `std::unordered_set`. `advance_to`
+`cancel(id)` marks the event id in a small `std::unordered_set`. `pop_due`
 skips popped events whose id is in the set. The set is cleared when empty.
 Typical steady-state size is 0-3. Standard technique.
 
@@ -640,8 +643,7 @@ Typical steady-state size is 0-3. Standard technique.
 ### 9.4 Event kinds
 
 A single enum, dispatched via one switch in `nds.cpp::on_scheduler_event`.
-The scheduler itself never sees `EventKind` as anything other than an
-opaque ordering key.
+The scheduler itself treats `EventKind` as opaque data — it is stored in the `Event` struct and passes through the heap, but the scheduler never inspects or branches on it.
 
 ```
 FrameEnd,
@@ -679,7 +681,7 @@ into debug builds. The X-Ray scheduler page reads from this stream.
 
 ### 9.8 Performance
 
-The `peek_next -> run_until -> advance_to` loop is the hottest code after the
+The `peek_next -> run_until -> set_now -> pop_due` loop is the hottest code after the
 instruction decoders. Keeping events rare (never per-instruction) keeps
 scheduler overhead at 1-3% of total runtime.
 
