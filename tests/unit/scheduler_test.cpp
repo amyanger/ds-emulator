@@ -48,10 +48,11 @@ static void test_cancel_head() {
     Scheduler s;
     const EventId a = s.schedule_at(50,  EventKind::FrameEnd, 0xAA);
     s.cancel(a);
-    s.schedule_at(100, EventKind::FrameEnd, 0xBB);
+    const EventId b = s.schedule_at(100, EventKind::FrameEnd, 0xBB);
 
     Event ev{};
     REQUIRE(s.pop_due(Scheduler::kNoEvent, ev));
+    REQUIRE(ev.id == b);
     REQUIRE(ev.when == 100);
     REQUIRE(ev.payload == 0xBB);
     REQUIRE(!s.pop_due(Scheduler::kNoEvent, ev));

@@ -23,8 +23,10 @@ public:
     EventId schedule_at(Cycle when, EventKind kind, u64 payload = 0);
     EventId schedule_in(Cycle delta, EventKind kind, u64 payload = 0);
 
-    // Mark an event as cancelled. Idempotent; unknown ids are a no-op.
-    // The event stays in the heap as a tombstone until popped.
+    // Mark an event as cancelled. The event stays in the heap as a tombstone
+    // until popped. Only pass ids returned from schedule_at — an unknown or
+    // already-fired id adds a permanent entry to cancelled_ that is cleaned
+    // only by reset().
     void cancel(EventId id);
 
     Cycle now() const { return now_; }

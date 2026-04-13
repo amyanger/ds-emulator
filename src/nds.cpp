@@ -23,11 +23,12 @@ void NDS::run_frame() {
 
     while (!frame_done_) {
         const Cycle next = scheduler_.peek_next();
+        if (next == Scheduler::kNoEvent) break;  // heap drained early; shouldn't happen today
         cpu9_.run_until(next);
         cpu7_.run_until(next);
         scheduler_.set_now(next);
 
-        Event ev;
+        Event ev{};
         while (scheduler_.pop_due(next, ev)) {
             on_scheduler_event(ev);
         }

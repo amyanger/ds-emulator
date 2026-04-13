@@ -12,7 +12,9 @@ class NDS {
 public:
     NDS();
 
+    // Advance the emulator by one video frame via the scheduler event loop.
     void run_frame();
+
     void reset();
 
     Scheduler& scheduler() { return scheduler_; }
@@ -20,6 +22,8 @@ public:
     Arm7&      cpu7()      { return cpu7_; }
 
 private:
+    // Central dispatch for scheduler events — the only place EventKind values
+    // map to behavior. NDS owns this switch (scheduler is a pure data structure).
     void on_scheduler_event(const Event& ev);
 
     Scheduler scheduler_;

@@ -135,7 +135,7 @@ void NDS::run_frame() {
         scheduler.set_now(next);
         // Fire any events whose when <= next.
         Event ev;
-        while (scheduler.pop_due(next, ev)) on_event(ev);
+        while (scheduler.pop_due(next, ev)) on_scheduler_event(ev);
     }
 }
 ```
@@ -602,10 +602,10 @@ struct Event {
 };
 
 class Scheduler {
-    std::vector<Event>          heap;       // min-heap by (when, id)
+    std::vector<Event>          heap_;      // min-heap by (when, id)
     std::unordered_set<uint64_t> cancelled_; // tombstones
-    Cycle                       now = 0;
-    uint64_t                    next_id = 1;
+    Cycle                       now_     = 0;
+    uint64_t                    next_id_ = 1;
 public:
     uint64_t schedule_in(Cycle delta, EventKind kind, uint64_t payload = 0);
     uint64_t schedule_at(Cycle when,  EventKind kind, uint64_t payload = 0);
