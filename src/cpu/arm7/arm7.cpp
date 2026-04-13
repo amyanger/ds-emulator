@@ -1,7 +1,5 @@
 #include "cpu/arm7/arm7.hpp"
 
-#include "bus/arm7_bus.hpp"
-
 #include <cassert>
 
 namespace ds {
