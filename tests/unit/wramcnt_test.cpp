@@ -28,7 +28,8 @@ static void mode_0_arm9_has_full_32k_arm7_sees_private() {
     REQUIRE(nds.arm9_bus().read32(0x0300'4000) == 0);
     REQUIRE(nds.arm9_bus().read32(0x0300'8000) == 0xAABB'CCDDu);
 
-    // ARM7 at 0x0300'0000 sees its own WRAM mirror, not shared WRAM.
+    // Mode 0: ARM7 at 0x0300'0000 maps to its own private ARM7 WRAM
+    // (not shared WRAM). arm7_wram_ was zero-filled by NDS::reset().
     REQUIRE(nds.arm7_bus().read32(0x0300'0000) == 0);
 }
 
@@ -43,10 +44,10 @@ static void mode_1_splits_16k_16k_high_to_arm9_low_to_arm7() {
 
     // ARM9 reads back its own 16 KB slice, mirrored across region 3.
     REQUIRE(nds.arm9_bus().read32(0x0300'0000) == 0x1111'1111u);
-    REQUIRE(nds.arm9_bus().read32(0x0300'4000) == 0x1111'1111u);  // 16 KB mirror
+    REQUIRE(nds.arm9_bus().read32(0x0300'4000) == 0x1111'1111u);  // +0x4000 wraps to start of ARM9's 16 KB slice
     // ARM7 reads back its own 16 KB slice.
     REQUIRE(nds.arm7_bus().read32(0x0300'0000) == 0x2222'2222u);
-    REQUIRE(nds.arm7_bus().read32(0x0300'4000) == 0x2222'2222u);  // 16 KB mirror
+    REQUIRE(nds.arm7_bus().read32(0x0300'4000) == 0x2222'2222u);  // +0x4000 wraps to start of ARM7's 16 KB slice
 }
 
 static void mode_2_splits_16k_16k_low_to_arm9_high_to_arm7() {
@@ -96,6 +97,10 @@ static void arm7_cannot_modify_wramcnt() {
     REQUIRE(nds.arm9_bus().read32(0x0300'0000) == 0x7777'7777u);
     // ARM7 at 0x0300'0000 still sees its slice (first 16 KB), not ARM9's.
     REQUIRE(nds.arm7_bus().read32(0x0300'0000) != 0x7777'7777u);
+    // Positive anchor: ARM7's mode-1 slice (first 16 KB of shared WRAM)
+    // was never written, so it must still read zero. This rules out the
+    // mode having been silently changed to something other than 1.
+    REQUIRE(nds.arm7_bus().read32(0x0300'0000) == 0);
 }
 
 int main() {
