@@ -28,3 +28,6 @@ dump_mainram.bin
 dump_vram.bin
 savestate_*.bin
 stderr.log
+
+# Claude Code local context — never commit, never share
+CLAUDE.md
