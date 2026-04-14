@@ -274,6 +274,51 @@ static void smlals_flag_reflects_full_64_bit_result() {
     REQUIRE((nds.cpu7().state().cpsr & (1u << 30)) == 0);  // Z clear
 }
 
+static void mul_rm_equals_rd_warn_path() {
+    // Rm == Rd is UNPREDICTABLE on ARMv4T. We warn and execute as written.
+    // The result is the standard product; there is no side-effect to Rm
+    // before the multiplication, because we read both operands into locals
+    // before writing Rd.
+    NDS nds;
+    nds.cpu7().state().r[0] = 3u;
+    nds.cpu7().state().r[1] = 4u;
+    // encode_mul(s=false, rd=0, rm=0, rs=1): Rd=R0, Rm=R0, Rs=R1
+    run_one(nds, kBase, encode_mul(false, 0, 0, 1));
+    REQUIRE(nds.cpu7().state().r[0] == 12u);  // 3 * 4
+}
+
+static void mul_rd_equals_r15_warn_path() {
+    // Rd == R15 is UNPREDICTABLE. We warn and still perform the write.
+    // write_rd masks R15 to 4-byte alignment when it sets state.pc.
+    // We use an aligned target so no masking loss occurs, and verify PC
+    // lands there (test does NOT verify the post-write pipeline flush
+    // because we don't model a real pipeline — R15 is a single register).
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x02000100u;
+    nds.cpu7().state().r[2] = 1u;
+    // encode_mul(s=false, rd=15, rm=1, rs=2)
+    run_one(nds, kBase, encode_mul(false, 15, 1, 2));
+    // 0x02000100 * 1 == 0x02000100; write_rd aligns to word boundary;
+    // state.pc is updated because write_rd stomps pc on R15 writes.
+    REQUIRE(nds.cpu7().state().pc == 0x02000100u);
+}
+
+static void umull_rd_hi_equals_rd_lo_warn_path() {
+    // RdHi == RdLo is UNPREDICTABLE. We warn and execute the two writes
+    // in the documented order: RdLo first, then RdHi. The second write
+    // wins, so the final register value is whatever bit[63:32] of the
+    // 64-bit product is.
+    NDS nds;
+    nds.cpu7().state().r[2] = 0xFFFFFFFFu;
+    nds.cpu7().state().r[3] = 0xFFFFFFFFu;
+    // encode_long_mul(signed=false, acc=false, s=false, rd_hi=0, rd_lo=0, rm=2, rs=3)
+    // Both halves target R0. Product = 0xFFFFFFFE_00000001.
+    // RdLo writes 0x00000001 to R0 first, then RdHi writes 0xFFFFFFFE.
+    // Second write wins.
+    run_one(nds, kBase, encode_long_mul(false, false, false, 0, 0, 2, 3));
+    REQUIRE(nds.cpu7().state().r[0] == 0xFFFFFFFEu);
+}
+
 int main() {
     mul_plain_small_operands();
     mul_overflow_low32_truncates();
@@ -295,6 +340,9 @@ int main() {
     umlal_carry_propagates_lo_to_hi();
     smlal_signed_negative_accumulator();
     smlals_flag_reflects_full_64_bit_result();
-    std::puts("arm7_multiply_test: all 20 cases passed");
+    mul_rm_equals_rd_warn_path();
+    mul_rd_equals_r15_warn_path();
+    umull_rd_hi_equals_rd_lo_warn_path();
+    std::puts("arm7_multiply_test: all 23 cases passed");
     return 0;
 }
