@@ -160,6 +160,37 @@ int main() {
         REQUIRE((nds.cpu7().state().cpsr & (1u << 29)) != 0);  // C set (carry out)
     }
 
-    std::puts("arm7_reg_shift_dp_test: all 10 cases passed");
+    // Test 11: MOV R0, R15, LSL R1 with R1=0 → R0 == PC+12, not PC+8
+    // Instruction lives at kBase. r[15] at execute time is kBase+8.
+    // Reg-shift form reads r[15] as PC+12 == kBase+12.
+    {
+        NDS nds;
+        nds.cpu7().state().r[1] = 0u;
+        run_one(nds, kBase, encode_reg_shift_dp(kOpMOV, false, 0, 0, 1, kLSL, 15));
+        REQUIRE(nds.cpu7().state().r[0] == kBase + 12u);
+    }
+
+    // Test 12: ADD R0, R15, R2, LSL R3 with R3=0 → R0 == (PC+12) + R2
+    // Same PC+12 rule for Rn==15 in reg-shift form.
+    {
+        NDS nds;
+        nds.cpu7().state().r[2] = 0x100u;
+        nds.cpu7().state().r[3] = 0u;
+        run_one(nds, kBase, encode_reg_shift_dp(kOpADD, false, 15, 0, 3, kLSL, 2));
+        REQUIRE(nds.cpu7().state().r[0] == (kBase + 12u) + 0x100u);
+    }
+
+    // Test 13: MOV R0, R1, LSL R15 → warn logged (Rs == 15 is UNPREDICTABLE),
+    // result uses PC+12 == kBase+12 as the shift amount. Low byte of
+    // that address determines the effective shift; with kBase = 0x03800000,
+    // (kBase + 12) & 0xFF == 0x0C, so this behaves as LSL #12.
+    {
+        NDS nds;
+        nds.cpu7().state().r[1] = 0x1u;
+        run_one(nds, kBase, encode_reg_shift_dp(kOpMOV, false, 0, 0, 15, kLSL, 1));
+        REQUIRE(nds.cpu7().state().r[0] == (0x1u << ((kBase + 12u) & 0xFFu)));
+    }
+
+    std::puts("arm7_reg_shift_dp_test: all 13 cases passed");
     return 0;
 }
