@@ -173,6 +173,31 @@ static void ldr_register_offset_lsl0_identity() {
     REQUIRE(nds.cpu7().state().r[0] == 0x5566'7788u);
 }
 
+static void ldr_unaligned_rotates_by_byte_offset() {
+    // ARMv4T LDR from an unaligned address reads the aligned word and
+    // rotates the loaded value right by (addr & 3) * 8 bits. The bus
+    // access itself is always 4-byte aligned.
+    //
+    // Seed: 0xDEAD'BEEF at aligned kData.
+    // LDR from kData + 1 -> ROR by 8  -> 0xEFDE'ADBE
+    // LDR from kData + 2 -> ROR by 16 -> 0xBEEF'DEAD
+    // LDR from kData + 3 -> ROR by 24 -> 0xADBE'EFDE
+
+    for (u32 addr_off : { 1u, 2u, 3u }) {
+        NDS nds;
+        nds.cpu7().state().r[1] = kData + addr_off;
+        nds.arm7_bus().write32(kData, 0xDEAD'BEEFu);
+
+        // LDR R0, [R1, #0]   (P=1, U=1, B=0, W=0, L=1)
+        run_one(nds, 0xE591'0000u);
+
+        const u32 rot_bits = addr_off * 8u;
+        const u32 expected = (0xDEAD'BEEFu >> rot_bits)
+                           | (0xDEAD'BEEFu << (32u - rot_bits));
+        REQUIRE(nds.cpu7().state().r[0] == expected);
+    }
+}
+
 int main() {
     ldr_word_imm_offset_loads_value();
     str_word_imm_offset_stores_value();
@@ -184,6 +209,7 @@ int main() {
     ldr_post_index_uses_base_then_updates_rn();
     ldr_register_offset_lsl2_index_times_four();
     ldr_register_offset_lsl0_identity();
+    ldr_unaligned_rotates_by_byte_offset();
     std::puts("arm7_load_store_test OK");
     return 0;
 }
