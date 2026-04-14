@@ -36,8 +36,6 @@ The DS isn't "GBA + more" — it's a fundamentally different machine, so the arc
 - 🪟 **Three CMake targets**: `ds_core` (platform-free), `ds_frontend` (the only SDL-aware code), and `ds_emulator` (the binary). Unit tests link `ds_core` only — no SDL, no window.
 - 🩻 **In-emulator X-Ray debug overlay** — page-cycled real-time view of CPU state, bus page tables, VRAM bank map, OAM, palette, geometry FIFO, polygon list, scheduler events, IPC state, and SPU channels.
 
-> 📐 **Full architecture spec:** [`docs/superpowers/specs/2026-04-12-nds-emulator-design.md`](docs/superpowers/specs/2026-04-12-nds-emulator-design.md) — the source of truth for every design decision, ~1000 lines across 16 sections.
-
 ---
 
 ## 🏛️ Non-Negotiable Architecture Rules
