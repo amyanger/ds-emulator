@@ -45,12 +45,12 @@ constexpr bool bit_set(T value, unsigned n) {
 
 // Logging — cheap stderr macros. Phase 0 keeps it minimal; full logging in Phase 1.
 #define DS_LOG(level, fmt, ...)                                                          \
-    std::fprintf(stderr, "[" level "] " fmt "\n", ##__VA_ARGS__)
+    std::fprintf(stderr, "[" level "] " fmt "\n" __VA_OPT__(,) __VA_ARGS__)
 
-#define DS_LOG_DEBUG(fmt, ...) DS_LOG("DEBUG", fmt, ##__VA_ARGS__)
-#define DS_LOG_INFO(fmt, ...)  DS_LOG("INFO",  fmt, ##__VA_ARGS__)
-#define DS_LOG_WARN(fmt, ...)  DS_LOG("WARN",  fmt, ##__VA_ARGS__)
-#define DS_LOG_ERROR(fmt, ...) DS_LOG("ERROR", fmt, ##__VA_ARGS__)
+#define DS_LOG_DEBUG(fmt, ...) DS_LOG("DEBUG", fmt __VA_OPT__(,) __VA_ARGS__)
+#define DS_LOG_INFO(fmt, ...)  DS_LOG("INFO",  fmt __VA_OPT__(,) __VA_ARGS__)
+#define DS_LOG_WARN(fmt, ...)  DS_LOG("WARN",  fmt __VA_OPT__(,) __VA_ARGS__)
+#define DS_LOG_ERROR(fmt, ...) DS_LOG("ERROR", fmt __VA_OPT__(,) __VA_ARGS__)
 
 // Compile-time assertion helper with a readable name.
 #define DS_STATIC_ASSERT(cond, msg) static_assert((cond), msg)
