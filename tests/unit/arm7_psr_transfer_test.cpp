@@ -154,6 +154,43 @@ static void msr_cpsr_fsxc_reg_form_writes_full_register() {
     REQUIRE(nds.cpu7().state().cpsr == 0xDEADBE5Fu);
 }
 
+static void msr_spsr_in_system_mode_warns_no_change() {
+    // System mode has no SPSR slot — spsr_slot() returns nullptr.
+    // Write should warn and no-op; the banked SPSR for any other mode
+    // must stay untouched.
+    NDS nds;
+    nds.cpu7().state().switch_mode(Mode::System);
+    nds.cpu7().state().banks.spsr_svc = 0xAAAAAAAAu;  // witness value — must survive
+    nds.cpu7().state().r[0] = 0x5A5A5A5Au;
+    run_one(nds, kBase, encode_msr_reg(true, kMaskFC, 0));
+    REQUIRE(nds.cpu7().state().banks.spsr_svc == 0xAAAAAAAAu);
+}
+
+static void msr_spsr_f_reg_form_in_irq_mode_writes_irq_bank() {
+    // IRQ mode → spsr_slot() returns &banks.spsr_irq. MSR SPSR_f, R0
+    // writes only the flag byte of the IRQ-bank SPSR from R0.
+    // Pre-load banks.spsr_irq with a known value and verify only the
+    // top byte changes.
+    NDS nds;
+    nds.cpu7().state().switch_mode(Mode::Irq);
+    nds.cpu7().state().banks.spsr_irq = 0x00000011u;  // mode byte only
+    nds.cpu7().state().r[0] = 0xF0000000u;
+    run_one(nds, kBase, encode_msr_reg(true, kMaskF, 0));
+    REQUIRE(nds.cpu7().state().banks.spsr_irq == 0xF0000011u);
+}
+
+static void msr_spsr_c_imm_form_in_supervisor_mode_writes_svc_bank() {
+    // Supervisor mode → spsr_slot() returns &banks.spsr_svc. MSR SPSR_c, #0x80
+    // writes only the control byte. imm8=0x80, rot=0 → source=0x00000080.
+    // Pre-load banks.spsr_svc with 0x00000013 (mode byte only). After the
+    // MSR, control byte becomes 0x80 and the rest is preserved.
+    NDS nds;
+    nds.cpu7().state().switch_mode(Mode::Supervisor);
+    nds.cpu7().state().banks.spsr_svc = 0x00000013u;
+    run_one(nds, kBase, encode_msr_imm(true, kMaskC, 0x80u, 0));
+    REQUIRE(nds.cpu7().state().banks.spsr_svc == 0x00000080u);
+}
+
 int main() {
     mrs_cpsr_reads_full_status_register();
     mrs_spsr_in_system_mode_warns_and_returns_zero();
@@ -164,6 +201,9 @@ int main() {
     msr_cpsr_fc_writes_flags_and_control_bytes();
     msr_cpsr_f_reg_form_writes_flag_byte_from_register();
     msr_cpsr_fsxc_reg_form_writes_full_register();
-    std::puts("arm7_psr_transfer_test: all 9 cases passed");
+    msr_spsr_in_system_mode_warns_no_change();
+    msr_spsr_f_reg_form_in_irq_mode_writes_irq_bank();
+    msr_spsr_c_imm_form_in_supervisor_mode_writes_svc_bank();
+    std::puts("arm7_psr_transfer_test: all 12 cases passed");
     return 0;
 }

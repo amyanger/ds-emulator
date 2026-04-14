@@ -76,10 +76,18 @@ u32 dispatch_psr_transfer(Arm7State& state, u32 instr, u32 /*instr_addr*/) {
     if (instr & (1u << 17)) byte_mask |= 0x0000FF00u;  // x (reserved on v4T)
     if (instr & (1u << 16)) byte_mask |= 0x000000FFu;  // c (control byte)
 
-    // SPSR writes land in Task 12 — for now, warn and no-op.
+    // SPSR write: route through spsr_slot() which returns the current
+    // mode's banked SPSR slot, or nullptr for User/System (which share
+    // the user bank and have no SPSR storage — writing SPSR there is
+    // UNPREDICTABLE on real hardware).
     if (use_spsr) {
-        DS_LOG_WARN("arm7: MSR SPSR not yet implemented, instr 0x%08X at 0x%08X",
-                    instr, state.pc);
+        u32* slot = state.spsr_slot();
+        if (slot == nullptr) {
+            DS_LOG_WARN("arm7: MSR SPSR in User/System mode (unpredictable) at 0x%08X",
+                        state.pc);
+            return 1;
+        }
+        *slot = (*slot & ~byte_mask) | (source & byte_mask);
         return 1;
     }
 
