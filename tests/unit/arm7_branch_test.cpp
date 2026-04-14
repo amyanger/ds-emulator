@@ -113,6 +113,37 @@ static void bl_then_mov_pc_lr_returns() {
     REQUIRE(nds.cpu7().state().pc    == kBase + 4u);
 }
 
+static void bx_arm_target_jumps_and_clears_t() {
+    NDS nds;
+    // MOV R2, #(kBase + 0x10)   ; we'll synthesize this via two instructions:
+    //                             kBase + 0x10 is 0x0380'0010. Encoding a
+    //                             32-bit immediate in a MOV isn't possible
+    //                             in one instruction, so we use the register
+    //                             file directly and set R2 from the test.
+    // BX R2                      ; E12F'FF12
+    nds.arm7_bus().write32(kBase + 0, 0xE12F'FF12u);  // BX R2
+    nds.cpu7().state().r[2] = kBase + 0x10u;
+    nds.cpu7().state().pc   = kBase;
+    nds.cpu7().run_until(2);  // exactly 1 ARM7 instruction
+
+    REQUIRE(nds.cpu7().state().pc == kBase + 0x10u);
+    REQUIRE((nds.cpu7().state().cpsr & (1u << 5)) == 0u);  // T clear
+}
+
+static void bx_thumb_target_sets_t_and_masks_bit0() {
+    NDS nds;
+    // BX R3 with R3 = kBase + 0x21 → pc should become kBase + 0x20
+    // and T should be set. We do NOT execute another step after this;
+    // the next step_arm would trip the "Thumb not implemented" assert.
+    nds.arm7_bus().write32(kBase + 0, 0xE12F'FF13u);  // BX R3
+    nds.cpu7().state().r[3] = kBase + 0x21u;
+    nds.cpu7().state().pc   = kBase;
+    nds.cpu7().run_until(2);
+
+    REQUIRE(nds.cpu7().state().pc == kBase + 0x20u);
+    REQUIRE((nds.cpu7().state().cpsr & (1u << 5)) != 0u);  // T set
+}
+
 int main() {
     b_forward_takes_branch();
     b_backward_takes_branch();
@@ -120,6 +151,8 @@ int main() {
     b_max_negative_offset_wraps();
     bl_links_return_address_and_jumps();
     bl_then_mov_pc_lr_returns();
+    bx_arm_target_jumps_and_clears_t();
+    bx_thumb_target_sets_t_and_masks_bit0();
     std::puts("arm7_branch_test OK");
     return 0;
 }

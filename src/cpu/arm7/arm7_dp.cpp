@@ -22,6 +22,21 @@ enum class DpOp : u8 {
 }  // namespace
 
 u32 dispatch_dp(Arm7State& state, u32 instr, u32 instr_addr) {
+    // BX lives in DP encoding space: cond 0001 0010 1111 1111 1111 0001 Rm.
+    // Mask: 0x0FFFFFF0, match: 0x012FFF10 (with the condition field masked).
+    if ((instr & 0x0FFF'FFF0u) == 0x012F'FF10u) {
+        const u32  rm      = instr & 0xFu;
+        const u32  rm_val  = state.r[rm];          // rm==15 reads instr_addr+8
+        const bool thumb   = (rm_val & 0x1u) != 0;
+        const u32  target  = thumb ? (rm_val & ~0x1u) : (rm_val & ~0x3u);
+        if (thumb) {
+            state.cpsr |= (1u << 5);               // set T flag
+        }
+        write_rd(state, 15, target);
+        (void)instr_addr;
+        return 1;
+    }
+
     // Bit 4 of the instruction, when bit 25 (I) is 0, distinguishes
     // immediate-shift (bit4=0) from register-shift (bit4=1) operand2.
     const bool i_bit = ((instr >> 25) & 1u) != 0;
