@@ -198,6 +198,47 @@ static void ldr_unaligned_rotates_by_byte_offset() {
     }
 }
 
+static void ldr_into_r15_sets_pc() {
+    NDS nds;
+    nds.cpu7().state().r[1] = kData;
+    nds.arm7_bus().write32(kData, kBase + 0x40u);  // target address
+
+    // LDR R15, [R1, #0]
+    // cond=AL, 01, I=0, P=1, U=1, B=0, W=0, L=1, Rn=1, Rd=15, imm12=0
+    // -> 1110 0101 1001 0001 1111 0000 0000 0000 = 0xE591'F000
+    run_one(nds, 0xE591'F000u);
+
+    REQUIRE(nds.cpu7().state().pc == (kBase + 0x40u));
+    REQUIRE(nds.cpu7().state().r[15] == (kBase + 0x40u));
+}
+
+static void str_of_r15_stores_instr_addr_plus_12() {
+    NDS nds;
+    nds.cpu7().state().r[1] = kData;
+
+    // STR R15, [R1, #0]
+    // cond=AL, 01, I=0, P=1, U=1, B=0, W=0, L=0, Rn=1, Rd=15, imm12=0
+    // -> 1110 0101 1000 0001 1111 0000 0000 0000 = 0xE581'F000
+    run_one(nds, 0xE581'F000u);
+
+    // STR of R15 stores (instr_addr + 12) in ARMv4T. instr_addr = kBase.
+    REQUIRE(nds.arm7_bus().read32(kData) == (kBase + 12u));
+}
+
+static void ldr_rn_eq_rd_writeback_load_wins() {
+    NDS nds;
+    nds.cpu7().state().r[1] = kData;
+    nds.arm7_bus().write32(kData + 4, 0xC0DE'F00Du);
+
+    // LDR R1, [R1, #4]!   (pre-index writeback; Rn == Rd == 1)
+    // cond=AL, 01, I=0, P=1, U=1, B=0, W=1, L=1, Rn=1, Rd=1, imm12=4
+    // -> 1110 0101 1011 0001 0001 0000 0000 0100 = 0xE5B1'1004
+    run_one(nds, 0xE5B1'1004u);
+
+    // Load wins: R1 is the loaded value, not the writeback value.
+    REQUIRE(nds.cpu7().state().r[1] == 0xC0DE'F00Du);
+}
+
 int main() {
     ldr_word_imm_offset_loads_value();
     str_word_imm_offset_stores_value();
@@ -210,6 +251,9 @@ int main() {
     ldr_register_offset_lsl2_index_times_four();
     ldr_register_offset_lsl0_identity();
     ldr_unaligned_rotates_by_byte_offset();
+    ldr_into_r15_sets_pc();
+    str_of_r15_stores_instr_addr_plus_12();
+    ldr_rn_eq_rd_writeback_load_wins();
     std::puts("arm7_load_store_test OK");
     return 0;
 }
