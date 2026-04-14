@@ -72,6 +72,7 @@ static u32 encode_halfword_reg(u8 cond, u8 p, u8 u, u8 w, u8 l,
 constexpr u8 kCondAL = 0xE;
 constexpr u8 kSHhalf = 1;  // SH=1 -> halfword unsigned
 constexpr u8 kSHsb   = 2;  // SH=2 -> signed byte
+constexpr u8 kSHsh   = 3;  // SH=3 -> signed halfword
 
 }  // namespace
 
@@ -409,6 +410,109 @@ static void test_ldrsb_unaligned_address_is_fine() {
     REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'FFC3u);
 }
 
+// ---- LDRSH cases ----------------------------------------------------------
+
+// LDRSH R0, [R1]  — positive halfword 0x1234 (bit 15 clear). The high 16
+// bits must be zero because the sign bit is zero.
+static void test_ldrsh_positive_halfword() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x0380'0600u;
+    nds.arm7_bus().write16(0x0380'0600u, 0x1234u);
+
+    run_one(nds, kBase,
+            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
+                                /*Rn*/1, /*Rd*/0, kSHsh, /*off*/0));
+
+    REQUIRE(nds.cpu7().state().r[0] == 0x0000'1234u);
+}
+
+// LDRSH R0, [R1]  — 0x8000 is the minimum signed i16 (bit 15 set).
+// Must sign-extend to 0xFFFF'8000.
+static void test_ldrsh_negative_halfword_sign_extended() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x0380'0602u;
+    nds.arm7_bus().write16(0x0380'0602u, 0x8000u);
+
+    run_one(nds, kBase,
+            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
+                                /*Rn*/1, /*Rd*/0, kSHsh, /*off*/0));
+
+    REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'8000u);
+}
+
+// LDRSH R0, [R1]  — 0xFFFF is the strongest sign-extension verification:
+// every bit of the result must be 1.
+static void test_ldrsh_negative_halfword_ffff() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x0380'0604u;
+    nds.arm7_bus().write16(0x0380'0604u, 0xFFFFu);
+
+    run_one(nds, kBase,
+            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
+                                /*Rn*/1, /*Rd*/0, kSHsh, /*off*/0));
+
+    REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'FFFFu);
+}
+
+// LDRSH R0, [R1, #4]!  — pre-index, up, writeback. Target halfword 0xABCD
+// has bit 15 set, so R0 must be 0xFFFF'ABCD, and R1 must update to the
+// pre-indexed address.
+static void test_ldrsh_imm_preindex_up_writeback() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x0380'0700u;
+    nds.arm7_bus().write16(0x0380'0704u, 0xABCDu);
+
+    run_one(nds, kBase,
+            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/1, /*L*/1,
+                                /*Rn*/1, /*Rd*/0, kSHsh, /*off*/4));
+
+    REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'ABCDu);
+    REQUIRE(nds.cpu7().state().r[1] == 0x0380'0704u);
+}
+
+// LDRSH R0, [R1], #-2  — post-index, down. Access happens at the
+// original Rn, then Rn is decremented by 2.
+static void test_ldrsh_imm_postindex_down() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x0380'0710u;
+    nds.arm7_bus().write16(0x0380'0710u, 0x7FFFu);
+
+    run_one(nds, kBase,
+            encode_halfword_imm(kCondAL, /*P*/0, /*U*/0, /*W*/0, /*L*/1,
+                                /*Rn*/1, /*Rd*/0, kSHsh, /*off*/2));
+
+    REQUIRE(nds.cpu7().state().r[0] == 0x0000'7FFFu);
+    REQUIRE(nds.cpu7().state().r[1] == 0x0380'070Eu);
+}
+
+// LDRSH R0, [R1, R2]  — register-offset form, negative halfword.
+static void test_ldrsh_reg_preindex_up() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x0380'0720u;
+    nds.cpu7().state().r[2] = 0x10u;
+    nds.arm7_bus().write16(0x0380'0730u, 0x9001u);
+
+    run_one(nds, kBase,
+            encode_halfword_reg(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
+                                /*Rn*/1, /*Rd*/0, kSHsh, /*Rm*/2));
+
+    REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'9001u);
+}
+
+// LDRSH R0, [R1]  — 0x7FFF is the largest positive i16. Verifies the
+// boundary just below the sign-extension threshold: high 16 must be zero.
+static void test_ldrsh_positive_halfword_7fff() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x0380'0740u;
+    nds.arm7_bus().write16(0x0380'0740u, 0x7FFFu);
+
+    run_one(nds, kBase,
+            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
+                                /*Rn*/1, /*Rd*/0, kSHsh, /*off*/0));
+
+    REQUIRE(nds.cpu7().state().r[0] == 0x0000'7FFFu);
+}
+
 int main() {
     test_ldrh_imm_preindex_up_no_writeback();
     test_ldrh_imm_preindex_up_writeback();
@@ -435,6 +539,14 @@ int main() {
     test_ldrsb_reg_preindex_up();
     test_ldrsb_unaligned_address_is_fine();
 
-    std::puts("arm7_halfword_test: all LDRH, STRH, and LDRSB cases passed");
+    test_ldrsh_positive_halfword();
+    test_ldrsh_negative_halfword_sign_extended();
+    test_ldrsh_negative_halfword_ffff();
+    test_ldrsh_imm_preindex_up_writeback();
+    test_ldrsh_imm_postindex_down();
+    test_ldrsh_reg_preindex_up();
+    test_ldrsh_positive_halfword_7fff();
+
+    std::puts("arm7_halfword_test: all LDRH, STRH, LDRSB, and LDRSH cases passed");
     return 0;
 }
