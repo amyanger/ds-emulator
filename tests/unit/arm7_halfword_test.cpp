@@ -513,6 +513,75 @@ static void test_ldrsh_positive_halfword_7fff() {
     REQUIRE(nds.cpu7().state().r[0] == 0x0000'7FFFu);
 }
 
+// ---- Rn == Rd writeback suppression (loads) -------------------------------
+//
+// ARMv4T rule: when a load with writeback targets the same register as its
+// base (Rn == Rd), the loaded value wins and the writeback is suppressed.
+// The shared write_rd_and_writeback helper in arm7_halfword.cpp encodes this
+// with `if (addr.writeback && addr.rn != rd)`. These tests exercise all
+// three load variants so any future regression that drops the guard on one
+// variant is caught immediately. Stores are NOT subject to the rule —
+// test_strh_rn_eq_rd_writeback_proceeds_normally is the counter-example.
+
+// LDRH R0, [R0, #4]!  — load wins, writeback suppressed.
+static void test_ldrh_rn_eq_rd_writeback_suppressed() {
+    NDS nds;
+    nds.cpu7().state().r[0] = 0x0380'0500u;
+    nds.arm7_bus().write16(0x0380'0504u, 0xBEEFu);
+
+    run_one(nds, kBase,
+            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/1, /*L*/1,
+                                /*Rn*/0, /*Rd*/0, kSHhalf, /*off*/4));
+
+    REQUIRE(nds.cpu7().state().r[0] == 0x0000'BEEFu);   // loaded value wins
+    REQUIRE(nds.cpu7().state().r[0] != 0x0380'0504u);   // writeback suppressed
+}
+
+// LDRSB R0, [R0, #1]!  — sign-extended byte wins, writeback suppressed.
+static void test_ldrsb_rn_eq_rd_writeback_suppressed() {
+    NDS nds;
+    nds.cpu7().state().r[0] = 0x0380'0600u;
+    nds.arm7_bus().write8(0x0380'0601u, 0xFFu);
+
+    run_one(nds, kBase,
+            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/1, /*L*/1,
+                                /*Rn*/0, /*Rd*/0, kSHsb, /*off*/1));
+
+    REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'FFFFu);   // sign-extended
+    REQUIRE(nds.cpu7().state().r[0] != 0x0380'0601u);   // writeback suppressed
+}
+
+// LDRSH R0, [R0, #2]!  — sign-extended halfword wins, writeback suppressed.
+static void test_ldrsh_rn_eq_rd_writeback_suppressed() {
+    NDS nds;
+    nds.cpu7().state().r[0] = 0x0380'0700u;
+    nds.arm7_bus().write16(0x0380'0702u, 0x8000u);
+
+    run_one(nds, kBase,
+            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/1, /*L*/1,
+                                /*Rn*/0, /*Rd*/0, kSHsh, /*off*/2));
+
+    REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'8000u);   // sign-extended
+    REQUIRE(nds.cpu7().state().r[0] != 0x0380'0702u);   // writeback suppressed
+}
+
+// STRH R0, [R0, #4]!  — counter-example: stores write Rd's pre-writeback
+// value to memory, and writeback proceeds normally. The suppression rule
+// only applies to loads (because loads overwrite Rd and would clobber the
+// writeback). Here the stored halfword is the low 16 of the OLD R0
+// (0x03800800 & 0xFFFF == 0x0800) and R0 is updated to 0x03800804.
+static void test_strh_rn_eq_rd_writeback_proceeds_normally() {
+    NDS nds;
+    nds.cpu7().state().r[0] = 0x0380'0800u;
+
+    run_one(nds, kBase,
+            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/1, /*L*/0,
+                                /*Rn*/0, /*Rd*/0, kSHhalf, /*off*/4));
+
+    REQUIRE(nds.arm7_bus().read16(0x0380'0804u) == 0x0800u);  // low 16 of old R0
+    REQUIRE(nds.cpu7().state().r[0] == 0x0380'0804u);          // writeback fired
+}
+
 int main() {
     test_ldrh_imm_preindex_up_no_writeback();
     test_ldrh_imm_preindex_up_writeback();
@@ -546,6 +615,11 @@ int main() {
     test_ldrsh_imm_postindex_down();
     test_ldrsh_reg_preindex_up();
     test_ldrsh_positive_halfword_7fff();
+
+    test_ldrh_rn_eq_rd_writeback_suppressed();
+    test_ldrsb_rn_eq_rd_writeback_suppressed();
+    test_ldrsh_rn_eq_rd_writeback_suppressed();
+    test_strh_rn_eq_rd_writeback_proceeds_normally();
 
     std::puts("arm7_halfword_test: all LDRH, STRH, LDRSB, and LDRSH cases passed");
     return 0;
