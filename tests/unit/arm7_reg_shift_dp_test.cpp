@@ -55,156 +55,171 @@ u32 encode_reg_shift_dp(u32 opcode, bool s, u32 rn, u32 rd,
 
 }  // namespace
 
+// Test 1: MOV R0, R1, LSL R2 with R1=0x1, R2=3 → R0 == 0x8
+static void mov_lsl_reg_amount_3() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x1u;
+    nds.cpu7().state().r[2] = 3u;
+    run_one(nds, kBase, encode_reg_shift_dp(kOpMOV, false, 0, 0, 2, kLSL, 1));
+    REQUIRE(nds.cpu7().state().r[0] == 0x8u);
+}
+
+// Test 2: MOV R0, R1, LSL R2 with R2=0 → R0 == R1, CPSR.C preserved
+static void mov_lsl_reg_amount_zero_preserves_carry() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0xDEADBEEFu;
+    nds.cpu7().state().r[2] = 0u;
+    nds.cpu7().state().cpsr |= (1u << 29);  // set C before the instruction
+    run_one(nds, kBase, encode_reg_shift_dp(kOpMOV, true, 0, 0, 2, kLSL, 1));
+    REQUIRE(nds.cpu7().state().r[0] == 0xDEADBEEFu);
+    REQUIRE((nds.cpu7().state().cpsr & (1u << 29)) != 0);  // C preserved
+}
+
+// Test 3: MOV R0, R1, LSL R2 with R2=32 → R0 == 0, C == bit 0 of R1
+static void mov_lsl_reg_amount_32() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x80000001u;  // bit 0 set
+    nds.cpu7().state().r[2] = 32u;
+    run_one(nds, kBase, encode_reg_shift_dp(kOpMOV, true, 0, 0, 2, kLSL, 1));
+    REQUIRE(nds.cpu7().state().r[0] == 0u);
+    REQUIRE((nds.cpu7().state().cpsr & (1u << 29)) != 0);  // C = bit 0 of R1
+}
+
+// Test 4: MOV R0, R1, LSL R2 with R2=33 → R0 == 0, C == 0
+static void mov_lsl_reg_amount_33() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0xFFFFFFFFu;
+    nds.cpu7().state().r[2] = 33u;
+    nds.cpu7().state().cpsr |= (1u << 29);  // pre-set C to verify it gets cleared
+    run_one(nds, kBase, encode_reg_shift_dp(kOpMOV, true, 0, 0, 2, kLSL, 1));
+    REQUIRE(nds.cpu7().state().r[0] == 0u);
+    REQUIRE((nds.cpu7().state().cpsr & (1u << 29)) == 0);  // C cleared
+}
+
+// Test 5: MOV R0, R1, LSR R2 with R2=32 → R0 == 0, C == bit 31 of R1
+static void mov_lsr_reg_amount_32() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x80000000u;
+    nds.cpu7().state().r[2] = 32u;
+    run_one(nds, kBase, encode_reg_shift_dp(kOpMOV, true, 0, 0, 2, kLSR, 1));
+    REQUIRE(nds.cpu7().state().r[0] == 0u);
+    REQUIRE((nds.cpu7().state().cpsr & (1u << 29)) != 0);
+}
+
+// Test 6: MOV R0, R1, ASR R2 with R1=0x80000000, R2=32 → R0 == 0xFFFFFFFF
+static void mov_asr_reg_amount_32() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x80000000u;
+    nds.cpu7().state().r[2] = 32u;
+    run_one(nds, kBase, encode_reg_shift_dp(kOpMOV, false, 0, 0, 2, kASR, 1));
+    REQUIRE(nds.cpu7().state().r[0] == 0xFFFFFFFFu);
+}
+
+// Test 7: MOV R0, R1, ROR R2 with R2=32 → R0 == R1, C == bit 31 of R1
+static void mov_ror_reg_amount_32() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x80000000u;
+    nds.cpu7().state().r[2] = 32u;
+    run_one(nds, kBase, encode_reg_shift_dp(kOpMOV, true, 0, 0, 2, kROR, 1));
+    REQUIRE(nds.cpu7().state().r[0] == 0x80000000u);
+    REQUIRE((nds.cpu7().state().cpsr & (1u << 29)) != 0);
+}
+
+// Test 8: MOV R0, R1, ROR R2 with R2=64 → same as R2=32
+static void mov_ror_reg_amount_64_folds_to_32() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x80000000u;
+    nds.cpu7().state().r[2] = 64u;
+    run_one(nds, kBase, encode_reg_shift_dp(kOpMOV, true, 0, 0, 2, kROR, 1));
+    REQUIRE(nds.cpu7().state().r[0] == 0x80000000u);
+    REQUIRE((nds.cpu7().state().cpsr & (1u << 29)) != 0);
+}
+
+// Test 9: "only low byte of Rs matters" rule — ADD R0, R1, R2, LSL R3
+// with R3=0xFFFFFF04 should behave exactly like LSL #4 (low byte = 0x04).
+static void low_byte_of_rs_only() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x10u;
+    nds.cpu7().state().r[2] = 0x1u;
+    nds.cpu7().state().r[3] = 0xFFFFFF04u;
+    run_one(nds, kBase, encode_reg_shift_dp(kOpADD, false, 1, 0, 3, kLSL, 2));
+    REQUIRE(nds.cpu7().state().r[0] == 0x10u + (0x1u << 4));
+}
+
+// Test 10: ADDS R0, R1, R2, LSL R3 flag update matches imm-shift path.
+// R1 = 0xFFFFFFFF, R2 = 1, R3 = 0 (no shift). Result wraps to 0, carry out.
+static void adds_reg_shift_matches_imm_shift() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0xFFFFFFFFu;
+    nds.cpu7().state().r[2] = 0x1u;
+    nds.cpu7().state().r[3] = 0u;
+    run_one(nds, kBase, encode_reg_shift_dp(kOpADD, true, 1, 0, 3, kLSL, 2));
+    REQUIRE(nds.cpu7().state().r[0] == 0u);
+    REQUIRE((nds.cpu7().state().cpsr & (1u << 30)) != 0);  // Z set
+    REQUIRE((nds.cpu7().state().cpsr & (1u << 29)) != 0);  // C set (carry out)
+}
+
+// Test 11: MOV R0, R15, LSL R1 with R1=0 → R0 == PC+12, not PC+8
+// Instruction lives at kBase. r[15] at execute time is kBase+8.
+// Reg-shift form reads r[15] as PC+12 == kBase+12.
+static void mov_rm_is_pc_reads_pc12() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0u;
+    run_one(nds, kBase, encode_reg_shift_dp(kOpMOV, false, 0, 0, 1, kLSL, 15));
+    REQUIRE(nds.cpu7().state().r[0] == kBase + 12u);
+}
+
+// Test 12: ADD R0, R15, R2, LSL R3 with R3=0 → R0 == (PC+12) + R2
+// Same PC+12 rule for Rn==15 in reg-shift form.
+static void add_rn_is_pc_reads_pc12() {
+    NDS nds;
+    nds.cpu7().state().r[2] = 0x100u;
+    nds.cpu7().state().r[3] = 0u;
+    run_one(nds, kBase, encode_reg_shift_dp(kOpADD, false, 15, 0, 3, kLSL, 2));
+    REQUIRE(nds.cpu7().state().r[0] == (kBase + 12u) + 0x100u);
+}
+
+// Test 13: MOV R0, R1, LSL R15 → warn logged (Rs == 15 is UNPREDICTABLE),
+// result uses PC+12 == kBase+12 as the shift amount. Low byte of
+// that address determines the effective shift; with kBase = 0x03800000,
+// (kBase + 12) & 0xFF == 0x0C, so this behaves as LSL #12.
+static void mov_rs_is_pc_warn_and_pc12() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x1u;
+    run_one(nds, kBase, encode_reg_shift_dp(kOpMOV, false, 0, 0, 15, kLSL, 1));
+    REQUIRE(nds.cpu7().state().r[0] == (0x1u << ((kBase + 12u) & 0xFFu)));
+}
+
+// Test 14: MOVS R15, R1, LSL R2 with R1=0x02000100, R2=0 →
+// PC branches to 0x02000100 (masked to word align), warn logged,
+// normal flag update runs (no SPSR→CPSR copy — deferred to slice 3d).
+static void movs_rd_is_pc_warn_path() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x02000100u;
+    nds.cpu7().state().r[2] = 0u;
+    run_one(nds, kBase, encode_reg_shift_dp(kOpMOV, true, 0, 15, 2, kLSL, 1));
+    REQUIRE(nds.cpu7().state().pc == 0x02000100u);
+    // CPSR mode bits should still be whatever the reset default was
+    // (Supervisor, 0x13 — the Arm7State::reset() value). No SPSR copy
+    // happened because we haven't implemented that yet.
+    REQUIRE((nds.cpu7().state().cpsr & 0x1Fu) == 0x13u);
+}
+
 int main() {
-    // Test 1: MOV R0, R1, LSL R2 with R1=0x1, R2=3 → R0 == 0x8
-    {
-        NDS nds;
-        nds.cpu7().state().r[1] = 0x1u;
-        nds.cpu7().state().r[2] = 3u;
-        run_one(nds, kBase, encode_reg_shift_dp(kOpMOV, false, 0, 0, 2, kLSL, 1));
-        REQUIRE(nds.cpu7().state().r[0] == 0x8u);
-    }
-
-    // Test 2: MOV R0, R1, LSL R2 with R2=0 → R0 == R1, CPSR.C preserved
-    {
-        NDS nds;
-        nds.cpu7().state().r[1] = 0xDEADBEEFu;
-        nds.cpu7().state().r[2] = 0u;
-        nds.cpu7().state().cpsr |= (1u << 29);  // set C before the instruction
-        run_one(nds, kBase, encode_reg_shift_dp(kOpMOV, true, 0, 0, 2, kLSL, 1));
-        REQUIRE(nds.cpu7().state().r[0] == 0xDEADBEEFu);
-        REQUIRE((nds.cpu7().state().cpsr & (1u << 29)) != 0);  // C preserved
-    }
-
-    // Test 3: MOV R0, R1, LSL R2 with R2=32 → R0 == 0, C == bit 0 of R1
-    {
-        NDS nds;
-        nds.cpu7().state().r[1] = 0x80000001u;  // bit 0 set
-        nds.cpu7().state().r[2] = 32u;
-        run_one(nds, kBase, encode_reg_shift_dp(kOpMOV, true, 0, 0, 2, kLSL, 1));
-        REQUIRE(nds.cpu7().state().r[0] == 0u);
-        REQUIRE((nds.cpu7().state().cpsr & (1u << 29)) != 0);  // C = bit 0 of R1
-    }
-
-    // Test 4: MOV R0, R1, LSL R2 with R2=33 → R0 == 0, C == 0
-    {
-        NDS nds;
-        nds.cpu7().state().r[1] = 0xFFFFFFFFu;
-        nds.cpu7().state().r[2] = 33u;
-        nds.cpu7().state().cpsr |= (1u << 29);  // pre-set C to verify it gets cleared
-        run_one(nds, kBase, encode_reg_shift_dp(kOpMOV, true, 0, 0, 2, kLSL, 1));
-        REQUIRE(nds.cpu7().state().r[0] == 0u);
-        REQUIRE((nds.cpu7().state().cpsr & (1u << 29)) == 0);  // C cleared
-    }
-
-    // Test 5: MOV R0, R1, LSR R2 with R2=32 → R0 == 0, C == bit 31 of R1
-    {
-        NDS nds;
-        nds.cpu7().state().r[1] = 0x80000000u;
-        nds.cpu7().state().r[2] = 32u;
-        run_one(nds, kBase, encode_reg_shift_dp(kOpMOV, true, 0, 0, 2, kLSR, 1));
-        REQUIRE(nds.cpu7().state().r[0] == 0u);
-        REQUIRE((nds.cpu7().state().cpsr & (1u << 29)) != 0);
-    }
-
-    // Test 6: MOV R0, R1, ASR R2 with R1=0x80000000, R2=32 → R0 == 0xFFFFFFFF
-    {
-        NDS nds;
-        nds.cpu7().state().r[1] = 0x80000000u;
-        nds.cpu7().state().r[2] = 32u;
-        run_one(nds, kBase, encode_reg_shift_dp(kOpMOV, false, 0, 0, 2, kASR, 1));
-        REQUIRE(nds.cpu7().state().r[0] == 0xFFFFFFFFu);
-    }
-
-    // Test 7: MOV R0, R1, ROR R2 with R2=32 → R0 == R1, C == bit 31 of R1
-    {
-        NDS nds;
-        nds.cpu7().state().r[1] = 0x80000000u;
-        nds.cpu7().state().r[2] = 32u;
-        run_one(nds, kBase, encode_reg_shift_dp(kOpMOV, true, 0, 0, 2, kROR, 1));
-        REQUIRE(nds.cpu7().state().r[0] == 0x80000000u);
-        REQUIRE((nds.cpu7().state().cpsr & (1u << 29)) != 0);
-    }
-
-    // Test 8: MOV R0, R1, ROR R2 with R2=64 → same as R2=32
-    {
-        NDS nds;
-        nds.cpu7().state().r[1] = 0x80000000u;
-        nds.cpu7().state().r[2] = 64u;
-        run_one(nds, kBase, encode_reg_shift_dp(kOpMOV, true, 0, 0, 2, kROR, 1));
-        REQUIRE(nds.cpu7().state().r[0] == 0x80000000u);
-        REQUIRE((nds.cpu7().state().cpsr & (1u << 29)) != 0);
-    }
-
-    // Test 9: "only low byte of Rs matters" rule — ADD R0, R1, R2, LSL R3
-    // with R3=0xFFFFFF04 should behave exactly like LSL #4 (low byte = 0x04).
-    {
-        NDS nds;
-        nds.cpu7().state().r[1] = 0x10u;
-        nds.cpu7().state().r[2] = 0x1u;
-        nds.cpu7().state().r[3] = 0xFFFFFF04u;
-        run_one(nds, kBase, encode_reg_shift_dp(kOpADD, false, 1, 0, 3, kLSL, 2));
-        REQUIRE(nds.cpu7().state().r[0] == 0x10u + (0x1u << 4));
-    }
-
-    // Test 10: ADDS R0, R1, R2, LSL R3 flag update matches imm-shift path.
-    // R1 = 0xFFFFFFFF, R2 = 1, R3 = 0 (no shift). Result wraps to 0, carry out.
-    {
-        NDS nds;
-        nds.cpu7().state().r[1] = 0xFFFFFFFFu;
-        nds.cpu7().state().r[2] = 0x1u;
-        nds.cpu7().state().r[3] = 0u;
-        run_one(nds, kBase, encode_reg_shift_dp(kOpADD, true, 1, 0, 3, kLSL, 2));
-        REQUIRE(nds.cpu7().state().r[0] == 0u);
-        REQUIRE((nds.cpu7().state().cpsr & (1u << 30)) != 0);  // Z set
-        REQUIRE((nds.cpu7().state().cpsr & (1u << 29)) != 0);  // C set (carry out)
-    }
-
-    // Test 11: MOV R0, R15, LSL R1 with R1=0 → R0 == PC+12, not PC+8
-    // Instruction lives at kBase. r[15] at execute time is kBase+8.
-    // Reg-shift form reads r[15] as PC+12 == kBase+12.
-    {
-        NDS nds;
-        nds.cpu7().state().r[1] = 0u;
-        run_one(nds, kBase, encode_reg_shift_dp(kOpMOV, false, 0, 0, 1, kLSL, 15));
-        REQUIRE(nds.cpu7().state().r[0] == kBase + 12u);
-    }
-
-    // Test 12: ADD R0, R15, R2, LSL R3 with R3=0 → R0 == (PC+12) + R2
-    // Same PC+12 rule for Rn==15 in reg-shift form.
-    {
-        NDS nds;
-        nds.cpu7().state().r[2] = 0x100u;
-        nds.cpu7().state().r[3] = 0u;
-        run_one(nds, kBase, encode_reg_shift_dp(kOpADD, false, 15, 0, 3, kLSL, 2));
-        REQUIRE(nds.cpu7().state().r[0] == (kBase + 12u) + 0x100u);
-    }
-
-    // Test 13: MOV R0, R1, LSL R15 → warn logged (Rs == 15 is UNPREDICTABLE),
-    // result uses PC+12 == kBase+12 as the shift amount. Low byte of
-    // that address determines the effective shift; with kBase = 0x03800000,
-    // (kBase + 12) & 0xFF == 0x0C, so this behaves as LSL #12.
-    {
-        NDS nds;
-        nds.cpu7().state().r[1] = 0x1u;
-        run_one(nds, kBase, encode_reg_shift_dp(kOpMOV, false, 0, 0, 15, kLSL, 1));
-        REQUIRE(nds.cpu7().state().r[0] == (0x1u << ((kBase + 12u) & 0xFFu)));
-    }
-
-    // Test 14: MOVS R15, R1, LSL R2 with R1=0x02000100, R2=0 →
-    // PC branches to 0x02000100 (masked to word align), warn logged,
-    // normal flag update runs (no SPSR→CPSR copy — deferred to slice 3d).
-    {
-        NDS nds;
-        nds.cpu7().state().r[1] = 0x02000100u;
-        nds.cpu7().state().r[2] = 0u;
-        run_one(nds, kBase, encode_reg_shift_dp(kOpMOV, true, 0, 15, 2, kLSL, 1));
-        REQUIRE(nds.cpu7().state().pc == 0x02000100u);
-        // CPSR mode bits should still be whatever the reset default was
-        // (Supervisor, 0x13 — the Arm7State::reset() value). No SPSR copy
-        // happened because we haven't implemented that yet.
-        REQUIRE((nds.cpu7().state().cpsr & 0x1Fu) == 0x13u);
-    }
+    mov_lsl_reg_amount_3();
+    mov_lsl_reg_amount_zero_preserves_carry();
+    mov_lsl_reg_amount_32();
+    mov_lsl_reg_amount_33();
+    mov_lsr_reg_amount_32();
+    mov_asr_reg_amount_32();
+    mov_ror_reg_amount_32();
+    mov_ror_reg_amount_64_folds_to_32();
+    low_byte_of_rs_only();
+    adds_reg_shift_matches_imm_shift();
+    mov_rm_is_pc_reads_pc12();
+    add_rn_is_pc_reads_pc12();
+    mov_rs_is_pc_warn_and_pc12();
+    movs_rd_is_pc_warn_path();
 
     std::puts("arm7_reg_shift_dp_test: all 14 cases passed");
     return 0;
