@@ -38,15 +38,14 @@ struct HalfwordAddress {
 // Encode the P/U/W/I addressing math plus every GBATEK-documented
 // malformed-encoding warn path. All four halfword opcodes share this;
 // the variant-specific behavior lives in the transfer helpers below.
-[[maybe_unused]] HalfwordAddress compute_halfword_address(const Arm7State& state,
-                                                          u32 instr);
+HalfwordAddress compute_halfword_address(const Arm7State& state, u32 instr);
 
 // Transfer helpers — bodies land in tasks 4-7. Declared here so the
 // follow-up tasks only need to fill in the bodies, not touch the
 // anonymous-namespace declarations.
-[[maybe_unused]] u32  load_halfword_unsigned(Arm7Bus& bus, u32 address);  // task 4
-[[maybe_unused]] u32  load_halfword_signed(Arm7Bus& bus, u32 address);    // task 7
-[[maybe_unused]] u32  load_byte_signed(Arm7Bus& bus, u32 address);        // task 6
+u32               load_halfword_unsigned(Arm7Bus& bus, u32 address);       // task 4
+[[maybe_unused]] u32  load_halfword_signed(Arm7Bus& bus, u32 address);     // task 7
+[[maybe_unused]] u32  load_byte_signed(Arm7Bus& bus, u32 address);         // task 6
 [[maybe_unused]] void store_halfword(Arm7Bus& bus, u32 address, u32 value);  // task 5
 
 // Rn==Rd-safe Rd write with optional writeback. On a load where Rn==Rd,
@@ -55,9 +54,8 @@ struct HalfwordAddress {
 // path by logging and masking PC to word alignment (matching the
 // existing write_rd() helper convention — ARMv4 leaves CPSR.T unchanged
 // on PC writes, per GBATEK).
-[[maybe_unused]] void write_rd_and_writeback(Arm7State& state, u32 rd,
-                                             u32 value,
-                                             const HalfwordAddress& addr);
+void write_rd_and_writeback(Arm7State& state, u32 rd, u32 value,
+                            const HalfwordAddress& addr);
 
 HalfwordAddress compute_halfword_address(const Arm7State& state, u32 instr) {
     const u32  rn = (instr >> 16) & 0xFu;
@@ -115,8 +113,12 @@ HalfwordAddress compute_halfword_address(const Arm7State& state, u32 instr) {
     return out;
 }
 
-u32 load_halfword_unsigned(Arm7Bus&, u32) {
-    return 0;  // TODO(task 4): real LDRH body
+u32 load_halfword_unsigned(Arm7Bus& bus, u32 address) {
+    // Aligned path only — Task 9 adds the address[0]==1 rotate-by-8 quirk.
+    // We defensively mask the low bit so an odd address still returns a
+    // well-defined value; Task 9 will supersede this line with the real
+    // rotate behavior cross-referenced against melonDS.
+    return static_cast<u32>(bus.read16(address & ~1u));
 }
 
 u32 load_halfword_signed(Arm7Bus&, u32) {
@@ -155,8 +157,6 @@ void write_rd_and_writeback(Arm7State& state, u32 rd, u32 value,
 }  // namespace
 
 u32 dispatch_halfword(Arm7State& state, Arm7Bus& bus, u32 instr, u32 /*instr_addr*/) {
-    (void)bus;  // Task 2 stub; Task 3+ wire the helpers that use the bus.
-
     const bool l  = (instr & (1u << 20)) != 0;
     const u32  sh = (instr >> 5) & 0x3u;
 
@@ -166,30 +166,34 @@ u32 dispatch_halfword(Arm7State& state, Arm7Bus& bus, u32 instr, u32 /*instr_add
             case 0:
                 DS_LOG_WARN("arm7: SWP encoding encountered, not yet supported at 0x%08X",
                             state.pc);
-                return 1;
+                break;
             case 1:
                 DS_LOG_WARN("arm7: STRH not yet implemented at 0x%08X", state.pc);
-                return 1;
+                break;
             case 2:
             case 3:
                 DS_LOG_WARN("arm7: LDRD/STRD (ARMv5TE) on ARM7 at 0x%08X", state.pc);
-                return 1;
+                break;
         }
     } else {
         // Load-side SH slots.
         switch (sh) {
             case 0:
                 DS_LOG_WARN("arm7: halfword load with SH=0 (reserved) at 0x%08X", state.pc);
-                return 1;
-            case 1:
-                DS_LOG_WARN("arm7: LDRH not yet implemented at 0x%08X", state.pc);
-                return 1;
+                break;
+            case 1: {
+                const HalfwordAddress addr = compute_halfword_address(state, instr);
+                const u32 rd    = (instr >> 12) & 0xFu;
+                const u32 value = load_halfword_unsigned(bus, addr.address);
+                write_rd_and_writeback(state, rd, value, addr);
+                break;
+            }
             case 2:
                 DS_LOG_WARN("arm7: LDRSB not yet implemented at 0x%08X", state.pc);
-                return 1;
+                break;
             case 3:
                 DS_LOG_WARN("arm7: LDRSH not yet implemented at 0x%08X", state.pc);
-                return 1;
+                break;
         }
     }
     return 1;  // TODO(cycles): 1S+1N+1I for loads, 2N for STRH per GBATEK.
