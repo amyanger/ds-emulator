@@ -87,11 +87,26 @@ static void strb_stores_only_target_byte() {
     REQUIRE(nds.arm7_bus().read32(kData) == expected);
 }
 
+static void ldr_word_u0_subtracts_offset() {
+    NDS nds;
+    nds.cpu7().state().r[1] = kData + 0x10u;
+    nds.arm7_bus().write32(kData, 0xFEED'FACEu);
+
+    // LDR R0, [R1, #-0x10]
+    // cond=AL, 01, I=0, P=1, U=0, B=0, W=0, L=1, Rn=1, Rd=0, imm12=0x10
+    // -> 1110 0101 0001 0001 0000 0000 0001 0000 = 0xE511'0010
+    run_one(nds, 0xE511'0010u);
+
+    REQUIRE(nds.cpu7().state().r[0] == 0xFEED'FACEu);
+    REQUIRE(nds.cpu7().state().r[1] == kData + 0x10u);  // no writeback
+}
+
 int main() {
     ldr_word_imm_offset_loads_value();
     str_word_imm_offset_stores_value();
     ldrb_loads_byte_zero_extended();
     strb_stores_only_target_byte();
+    ldr_word_u0_subtracts_offset();
     std::puts("arm7_load_store_test OK");
     return 0;
 }
