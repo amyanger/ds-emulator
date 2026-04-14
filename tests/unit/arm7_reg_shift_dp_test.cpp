@@ -191,6 +191,21 @@ int main() {
         REQUIRE(nds.cpu7().state().r[0] == (0x1u << ((kBase + 12u) & 0xFFu)));
     }
 
-    std::puts("arm7_reg_shift_dp_test: all 13 cases passed");
+    // Test 14: MOVS R15, R1, LSL R2 with R1=0x02000100, R2=0 →
+    // PC branches to 0x02000100 (masked to word align), warn logged,
+    // normal flag update runs (no SPSR→CPSR copy — deferred to slice 3d).
+    {
+        NDS nds;
+        nds.cpu7().state().r[1] = 0x02000100u;
+        nds.cpu7().state().r[2] = 0u;
+        run_one(nds, kBase, encode_reg_shift_dp(kOpMOV, true, 0, 15, 2, kLSL, 1));
+        REQUIRE(nds.cpu7().state().pc == 0x02000100u);
+        // CPSR mode bits should still be whatever the reset default was
+        // (Supervisor, 0x13 — the Arm7State::reset() value). No SPSR copy
+        // happened because we haven't implemented that yet.
+        REQUIRE((nds.cpu7().state().cpsr & 0x1Fu) == 0x13u);
+    }
+
+    std::puts("arm7_reg_shift_dp_test: all 14 cases passed");
     return 0;
 }
