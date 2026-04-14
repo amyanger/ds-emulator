@@ -8,6 +8,7 @@ add_library(ds_core STATIC
     cpu/arm9/arm9.cpp
     cpu/arm7/arm7.cpp
     cpu/arm7/arm7_decode.cpp
+    cpu/arm7/arm7_dp.cpp
 )
 target_include_directories(ds_core
     PUBLIC  ${CMAKE_SOURCE_DIR}/include
