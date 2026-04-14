@@ -19,9 +19,8 @@ namespace ds {
 namespace {
 
 // Valid ARMv4T mode-bit patterns. Used by Task 13's MSR CPSR mode-change
-// path; declared here so Task 9 and Task 13 can share it. Marked
-// [[maybe_unused]] for the duration of Task 9 since MRS doesn't call it.
-[[maybe_unused]] bool is_valid_mode(Mode m) {
+// path; declared here so Task 9 and Task 13 can share it.
+bool is_valid_mode(Mode m) {
     switch (m) {
         case Mode::User: case Mode::Fiq: case Mode::Irq:
         case Mode::Supervisor: case Mode::Abort:
@@ -91,12 +90,40 @@ u32 dispatch_psr_transfer(Arm7State& state, u32 instr, u32 /*instr_addr*/) {
         return 1;
     }
 
-    // CPSR merge: write only the masked bytes from `source`, leave the
-    // rest unchanged. Mode-bit change handling (and the switch_mode() call)
-    // lands in Task 13. For Task 10, we do the raw merge; the Task 10
-    // tests deliberately stay in a single mode so the merge matches what
-    // Task 13 will produce.
-    state.cpsr = (state.cpsr & ~byte_mask) | (source & byte_mask);
+    // --- MSR CPSR ---
+    // Two ordering subtleties:
+    //   1. The T-bit change warn fires on any byte-mask pattern that
+    //      writes bit 5 to a different value. Games should flip T via
+    //      BX, not MSR; warn but honor the write.
+    //   2. If the control byte is being written and the new mode differs
+    //      from the current mode, we call switch_mode() *first* to save/
+    //      load register banks, then overwrite CPSR with the final merged
+    //      value (which has the correct mode bits by construction).
+    const u32 new_cpsr = (state.cpsr & ~byte_mask) | (source & byte_mask);
+
+    if ((byte_mask & 0x000000FFu) != 0) {
+        const u32 new_t = (new_cpsr >> 5) & 1u;
+        const u32 cur_t = (state.cpsr >> 5) & 1u;
+        if (new_t != cur_t) {
+            DS_LOG_WARN("arm7: MSR CPSR T-bit change (use BX) at 0x%08X", state.pc);
+        }
+
+        const Mode new_mode = static_cast<Mode>(new_cpsr & 0x1Fu);
+        const Mode cur_mode = state.current_mode();
+        if (new_mode != cur_mode) {
+            if (!is_valid_mode(new_mode)) {
+                DS_LOG_WARN("arm7: MSR CPSR illegal mode 0x%02X (unpredictable) at 0x%08X",
+                            static_cast<u32>(new_mode), state.pc);
+                // Skip the bank swap but still honor the byte write below,
+                // so the mode bits reflect the game's request. Debug
+                // visibility over strict fidelity.
+            } else {
+                state.switch_mode(new_mode);
+            }
+        }
+    }
+
+    state.cpsr = new_cpsr;
     return 1;
 }
 
