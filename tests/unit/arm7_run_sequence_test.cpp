@@ -35,8 +35,10 @@ static void arithmetic_sequence_computes_expected_result() {
     }
 
     nds.cpu7().state().pc = base;
-    nds.cpu7().state().r[15] = base + 8;
 
+    // Drive Arm7::run_until directly rather than NDS::run_frame — the
+    // latter would also spin the ARM9 Phase-0 stub, which is out of
+    // scope for this slice-3a integration test.
     // Run exactly 5 ARM7 cycles (= 10 ARM9 cycles).
     nds.cpu7().run_until(10);
 
@@ -73,7 +75,6 @@ static void condition_codes_gate_execution_in_sequence() {
     }
 
     nds.cpu7().state().pc = base;
-    nds.cpu7().state().r[15] = base + 8;
 
     // Run exactly 6 ARM7 cycles (= 12 ARM9 cycles).
     nds.cpu7().run_until(12);
@@ -83,6 +84,11 @@ static void condition_codes_gate_execution_in_sequence() {
     REQUIRE(nds.cpu7().state().r[2] == 0u);  // MOVNE skipped
     REQUIRE(nds.cpu7().state().r[3] == 0u);  // MOVEQ skipped after Z=0
     REQUIRE(nds.cpu7().state().cycles == 6u);
+
+    // Directly observe the Z flag too, not just inferred from conditional
+    // execution: the final MOVS R0, #1 cleared Z, so the assertion below
+    // would fail if a regression corrupted CPSR write-through.
+    REQUIRE((nds.cpu7().state().cpsr & (1u << 30)) == 0u);
 }
 
 int main() {
