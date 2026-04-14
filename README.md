@@ -20,8 +20,6 @@ A solo project to build a Nintendo DS emulator from scratch in modern C++. The p
 - ⚫ Pokémon **Black / White**
 - ⚫ Pokémon **Black 2 / White 2**
 
-The DS is a fundamentally more complex machine than the GBA — two CPUs on two bus domains, runtime-banked VRAM, a 3D engine, and scheduler-driven timing. So this isn't a port of anything. It's architected from the hardware up.
-
 ---
 
 ## 🏗️ Architecture at a Glance
