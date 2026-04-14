@@ -45,6 +45,15 @@ u32 encode_msr_imm(bool use_spsr, u32 mask_bits, u32 imm8, u32 rot) {
     return instr;
 }
 
+// MSR PSR, Rm: cond 00010 P 10 mask 1111 00000000 Rm
+u32 encode_msr_reg(bool use_spsr, u32 mask_bits, u32 rm) {
+    u32 instr = AL_COND | 0x0120F000u;
+    if (use_spsr) instr |= (1u << 22);
+    instr |= (mask_bits & 0xFu) << 16;
+    instr |= (rm & 0xFu);
+    return instr;
+}
+
 // Field mask bit positions (bits[19:16], listed LSB-first):
 //   bit 0 = c (control byte)
 //   bit 1 = x (extension byte, reserved on v4T)
@@ -53,6 +62,7 @@ u32 encode_msr_imm(bool use_spsr, u32 mask_bits, u32 imm8, u32 rot) {
 constexpr u32 kMaskF    = 0x8u;
 constexpr u32 kMaskC    = 0x1u;
 constexpr u32 kMaskFC   = kMaskF | kMaskC;
+constexpr u32 kMaskFSXC = 0xFu;  // all four byte fields (f, s, x, c)
 
 }  // namespace
 
@@ -117,6 +127,33 @@ static void msr_cpsr_fc_writes_flags_and_control_bytes() {
     REQUIRE(nds.cpu7().state().cpsr == 0x0000009Fu);
 }
 
+static void msr_cpsr_f_reg_form_writes_flag_byte_from_register() {
+    // MSR CPSR_f, R0 with R0 = 0x60000000 → only flag byte changes.
+    // R0's top byte sets Z=1 (bit30), C=1 (bit29), N=0, V=0. Other CPSR
+    // bytes preserved.
+    NDS nds;
+    nds.cpu7().state().cpsr = 0x0000001Fu;  // System mode, flags clear
+    nds.cpu7().state().r[0] = 0x60000000u;
+    run_one(nds, kBase, encode_msr_reg(false, kMaskF, 0));
+    REQUIRE((nds.cpu7().state().cpsr & (1u << 31)) == 0);  // N clear
+    REQUIRE((nds.cpu7().state().cpsr & (1u << 30)) != 0);  // Z set
+    REQUIRE((nds.cpu7().state().cpsr & (1u << 29)) != 0);  // C set
+    REQUIRE((nds.cpu7().state().cpsr & (1u << 28)) == 0);  // V clear
+    REQUIRE((nds.cpu7().state().cpsr & 0x1Fu) == 0x1Fu);    // mode preserved
+}
+
+static void msr_cpsr_fsxc_reg_form_writes_full_register() {
+    // MSR CPSR_fsxc, R0 writes every byte of CPSR from R0.
+    // Keep mode bits at 0x1F so we don't trigger Task 13's mode-change
+    // path. R0 = 0xDEAD'BE5F (top nibble DEAD is flag+reserved bytes,
+    // low byte 0x5F = I bit clear, T=0, mode=System).
+    NDS nds;
+    nds.cpu7().state().cpsr = 0x0000001Fu;
+    nds.cpu7().state().r[0] = 0xDEADBE5Fu;
+    run_one(nds, kBase, encode_msr_reg(false, kMaskFSXC, 0));
+    REQUIRE(nds.cpu7().state().cpsr == 0xDEADBE5Fu);
+}
+
 int main() {
     mrs_cpsr_reads_full_status_register();
     mrs_spsr_in_system_mode_warns_and_returns_zero();
@@ -125,6 +162,8 @@ int main() {
     msr_cpsr_f_zero_clears_flag_byte();
     msr_cpsr_c_sets_i_bit_without_touching_flags();
     msr_cpsr_fc_writes_flags_and_control_bytes();
-    std::puts("arm7_psr_transfer_test: all 7 cases passed");
+    msr_cpsr_f_reg_form_writes_flag_byte_from_register();
+    msr_cpsr_fsxc_reg_form_writes_full_register();
+    std::puts("arm7_psr_transfer_test: all 9 cases passed");
     return 0;
 }
