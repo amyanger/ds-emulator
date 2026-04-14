@@ -34,6 +34,7 @@ u32 dispatch_multiply(Arm7State& state, u32 instr, u32 instr_addr) {
     }
 
     const bool long_form  = ((instr >> 23) & 1u) != 0;
+    const bool signed_mul = ((instr >> 22) & 1u) != 0;  // long_form only
     const bool accumulate = ((instr >> 21) & 1u) != 0;
     const bool set_flags  = ((instr >> 20) & 1u) != 0;
 
@@ -67,13 +68,54 @@ u32 dispatch_multiply(Arm7State& state, u32 instr, u32 instr_addr) {
         return 1;
     }
 
-    // Long-form handling is added in Tasks 6 / 7. In slice 3b2 Task 5
-    // we log a warn so any ROM that uses UMULL/SMULL/UMLAL/SMLAL is
-    // loudly noticed, then no-op.
-    DS_LOG_WARN("arm7: long-form multiply 0x%08X at 0x%08X (not yet implemented)",
-                instr, instr_addr);
-    (void)accumulate;
-    (void)set_flags;
+    // Long form: 64-bit result in RdHi:RdLo.
+    const u32 rm    = instr & 0xFu;
+    const u32 rs    = (instr >> 8) & 0xFu;
+    const u32 rd_lo = (instr >> 12) & 0xFu;
+    const u32 rd_hi = (instr >> 16) & 0xFu;
+
+    if (rd_hi == 15 || rd_lo == 15)
+        log_multiply_unpredictable(instr, "RdHi/RdLo==15", state.pc);
+    if (rd_hi == rd_lo)
+        log_multiply_unpredictable(instr, "RdHi==RdLo", state.pc);
+
+    const u32 rm_v = state.r[rm];
+    const u32 rs_v = state.r[rs];
+
+    u64 product;
+    if (signed_mul) {
+        const i64 sp = static_cast<i64>(static_cast<i32>(rm_v))
+                     * static_cast<i64>(static_cast<i32>(rs_v));
+        product = static_cast<u64>(sp);
+    } else {
+        product = static_cast<u64>(rm_v) * static_cast<u64>(rs_v);
+    }
+
+    if (accumulate) {
+        // Read both halves of the pre-existing RdHi:RdLo before calling
+        // write_rd. Otherwise, when Rd_lo happens to equal one of the
+        // operand registers, writing it first would clobber the operand.
+        const u64 acc = (static_cast<u64>(state.r[rd_hi]) << 32)
+                      | static_cast<u64>(state.r[rd_lo]);
+        product += acc;  // u64 wraparound matches HW for both signed and unsigned
+    }
+
+    // Write RdLo first, then RdHi. On RdHi == RdLo (UNPREDICTABLE), the
+    // second write wins — we already warned above. Neither half is R15
+    // in well-formed code; we warned if it is.
+    write_rd(state, rd_lo, static_cast<u32>(product));
+    write_rd(state, rd_hi, static_cast<u32>(product >> 32));
+
+    if (set_flags) {
+        u32 cpsr = state.cpsr & ~0xC0000000u;
+        if (product == 0)               cpsr |= (1u << 30);  // Z
+        if ((product >> 63) & 1u)       cpsr |= (1u << 31);  // N
+        state.cpsr = cpsr;
+        // C: UNPREDICTABLE on ARMv4T → preserve. V: unchanged.
+    }
+
+    (void)instr_addr;
+    // TODO(cycles): Rs-dependent early-termination table.
     return 1;
 }
 

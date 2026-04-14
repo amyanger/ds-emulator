@@ -49,6 +49,22 @@ u32 encode_mla(bool s, u32 rd, u32 rm, u32 rs, u32 rn) {
     return instr;
 }
 
+// Long multiplies: cond 00001 U A S RdHi RdLo Rs 1001 Rm
+//   bit 22 (U): 1=signed, 0=unsigned
+//   bit 21 (A): 1=accumulate, 0=plain
+u32 encode_long_mul(bool signed_mul, bool accumulate, bool s,
+                    u32 rd_hi, u32 rd_lo, u32 rm, u32 rs) {
+    u32 instr = AL_COND | 0x00800090u;  // bits[27:23]=00001
+    if (signed_mul) instr |= (1u << 22);
+    if (accumulate) instr |= (1u << 21);
+    if (s)          instr |= (1u << 20);
+    instr |= (rd_hi & 0xFu) << 16;
+    instr |= (rd_lo & 0xFu) << 12;
+    instr |= (rs    & 0xFu) << 8;
+    instr |= (rm    & 0xFu);
+    return instr;
+}
+
 }  // namespace
 
 static void mul_plain_small_operands() {
@@ -126,6 +142,82 @@ static void mlas_flag_behavior_matches_muls() {
     REQUIRE((nds.cpu7().state().cpsr & (1u << 30)) != 0);  // Z set
 }
 
+static void umull_0xffffffff_squared() {
+    NDS nds;
+    nds.cpu7().state().r[2] = 0xFFFFFFFFu;
+    nds.cpu7().state().r[3] = 0xFFFFFFFFu;
+    run_one(nds, kBase, encode_long_mul(false, false, false, 1, 0, 2, 3));
+    // 0xFFFFFFFF * 0xFFFFFFFF == 0xFFFFFFFE_00000001
+    REQUIRE(nds.cpu7().state().r[0] == 0x00000001u);  // RdLo
+    REQUIRE(nds.cpu7().state().r[1] == 0xFFFFFFFEu);  // RdHi
+}
+
+static void umull_zero_operand_zeros_both_halves() {
+    NDS nds;
+    nds.cpu7().state().r[2] = 0u;
+    nds.cpu7().state().r[3] = 0xDEADBEEFu;
+    run_one(nds, kBase, encode_long_mul(false, false, false, 1, 0, 2, 3));
+    REQUIRE(nds.cpu7().state().r[0] == 0u);
+    REQUIRE(nds.cpu7().state().r[1] == 0u);
+}
+
+static void umulls_bit63_clear_clears_n_and_z() {
+    NDS nds;
+    nds.cpu7().state().r[2] = 2u;
+    nds.cpu7().state().r[3] = 3u;
+    run_one(nds, kBase, encode_long_mul(false, false, true, 1, 0, 2, 3));
+    REQUIRE(nds.cpu7().state().r[0] == 6u);
+    REQUIRE(nds.cpu7().state().r[1] == 0u);
+    REQUIRE((nds.cpu7().state().cpsr & (1u << 31)) == 0);  // N clear
+    REQUIRE((nds.cpu7().state().cpsr & (1u << 30)) == 0);  // Z clear
+}
+
+static void umulls_zero_product_sets_z() {
+    NDS nds;
+    nds.cpu7().state().r[2] = 0u;
+    nds.cpu7().state().r[3] = 0u;
+    run_one(nds, kBase, encode_long_mul(false, false, true, 1, 0, 2, 3));
+    REQUIRE((nds.cpu7().state().cpsr & (1u << 30)) != 0);  // Z set
+}
+
+static void smull_negative_times_negative_is_one() {
+    NDS nds;
+    nds.cpu7().state().r[2] = 0xFFFFFFFFu;  // -1
+    nds.cpu7().state().r[3] = 0xFFFFFFFFu;  // -1
+    run_one(nds, kBase, encode_long_mul(true, false, false, 1, 0, 2, 3));
+    REQUIRE(nds.cpu7().state().r[0] == 0x00000001u);
+    REQUIRE(nds.cpu7().state().r[1] == 0x00000000u);
+}
+
+static void smull_negative_times_one_is_negative() {
+    NDS nds;
+    nds.cpu7().state().r[2] = 0xFFFFFFFFu;  // -1
+    nds.cpu7().state().r[3] = 0x00000001u;  //  1
+    run_one(nds, kBase, encode_long_mul(true, false, false, 1, 0, 2, 3));
+    // -1 sign-extended to 64 bits: 0xFFFFFFFFFFFFFFFF
+    REQUIRE(nds.cpu7().state().r[0] == 0xFFFFFFFFu);
+    REQUIRE(nds.cpu7().state().r[1] == 0xFFFFFFFFu);
+}
+
+static void smull_int_min_squared() {
+    NDS nds;
+    nds.cpu7().state().r[2] = 0x80000000u;  // INT_MIN
+    nds.cpu7().state().r[3] = 0x80000000u;  // INT_MIN
+    run_one(nds, kBase, encode_long_mul(true, false, false, 1, 0, 2, 3));
+    // (-2^31) * (-2^31) = +2^62 = 0x4000000000000000
+    REQUIRE(nds.cpu7().state().r[0] == 0x00000000u);
+    REQUIRE(nds.cpu7().state().r[1] == 0x40000000u);
+}
+
+static void smulls_negative_product_sets_n() {
+    NDS nds;
+    nds.cpu7().state().r[2] = 0xFFFFFFFFu;  // -1
+    nds.cpu7().state().r[3] = 0x00000001u;
+    run_one(nds, kBase, encode_long_mul(true, false, true, 1, 0, 2, 3));
+    REQUIRE((nds.cpu7().state().cpsr & (1u << 31)) != 0);  // N set (bit 63 of result)
+    REQUIRE((nds.cpu7().state().cpsr & (1u << 30)) == 0);  // Z clear
+}
+
 int main() {
     mul_plain_small_operands();
     mul_overflow_low32_truncates();
@@ -135,6 +227,14 @@ int main() {
     mla_plain_accumulate();
     mla_accumulator_overflow_wraps();
     mlas_flag_behavior_matches_muls();
-    std::puts("arm7_multiply_test: all 8 cases passed");
+    umull_0xffffffff_squared();
+    umull_zero_operand_zeros_both_halves();
+    umulls_bit63_clear_clears_n_and_z();
+    umulls_zero_product_sets_z();
+    smull_negative_times_negative_is_one();
+    smull_negative_times_one_is_negative();
+    smull_int_min_squared();
+    smulls_negative_product_sets_n();
+    std::puts("arm7_multiply_test: all 16 cases passed");
     return 0;
 }

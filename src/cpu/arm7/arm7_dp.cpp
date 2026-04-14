@@ -37,10 +37,13 @@ u32 dispatch_dp(Arm7State& state, u32 instr, u32 instr_addr) {
         return 1;
     }
 
-    // Multiply family: bits[27:22] ∈ {000000, 000001}, bits[7:4] == 1001.
-    // Peeled off before any DP operand decoding so the reg-shift form
-    // (bit4==1 with bit7==0) doesn't false-match.
-    if ((instr & 0x0FC000F0u) == 0x00000090u) {
+    // Multiply family: bits[27:24] == 0000, bits[7:4] == 1001. Bit 23
+    // distinguishes short (MUL/MLA) vs long (UMULL/UMLAL/SMULL/SMLAL);
+    // bit 22 is signed/unsigned for the long form. Peeled off before
+    // any DP operand decoding so the reg-shift form (bit4==1 with
+    // bit7==0) doesn't false-match. The halfword/swap encodings at
+    // bits[7:4] ∈ {1011,1101,1111} naturally don't collide with 1001.
+    if ((instr & 0x0F0000F0u) == 0x00000090u) {
         return dispatch_multiply(state, instr, instr_addr);
     }
 
