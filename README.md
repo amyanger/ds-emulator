@@ -158,7 +158,7 @@ Rebindable via `keybinds.cfg`. MFi / Xbox / DualSense controllers auto-detected 
 
 ```
 ds-emulator/
-├── 📐 docs/superpowers/specs/        ← Design spec (source of truth)
+├── 📐 docs/specs/        ← Design spec (source of truth)
 ├── 🛠️ cmake/                         ← Build helpers
 │   ├── CompilerWarnings.cmake
 │   ├── AppleSilicon.cmake
@@ -184,18 +184,14 @@ ds-emulator/
 │   ├── cartridge/                    ← Slot-1 bus + KEY1 + saves
 │   └── frontend/                     ← SDL2 — only place SDL is allowed
 │       └── xray/                     ← In-emulator debug overlay
-├── 🧪 tests/                         ← Unit tests (link ds_core only)
-└── 📜 CLAUDE.md                      ← Project conventions
+└── 🧪 tests/                         ← Unit tests (link ds_core only)
 ```
 
 ---
 
 ## 📖 Documentation
 
-| Document | What it is |
-|----------|-----------|
-| 🏛️ [Architecture Spec](docs/superpowers/specs/2026-04-12-nds-emulator-design.md) | Full design — 16 sections covering every subsystem |
-| 📜 [CLAUDE.md](CLAUDE.md) | Project conventions, code style, hardware quirks, and non-negotiable architecture rules |
+The full architecture spec lives at [`docs/specs/2026-04-12-nds-emulator-design.md`](docs/specs/2026-04-12-nds-emulator-design.md) — 16 sections covering every subsystem.
 
 ---
 

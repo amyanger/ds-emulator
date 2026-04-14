@@ -8,7 +8,7 @@
 
 ## 1. Context
 
-CLAUDE.md architecture rule #1: *the scheduler is the clock*. In this
+Architecture rule #1: *the scheduler is the clock*. In this
 design, time advances only through the `peek_next → cpu.run_until →
 set_now → pop_due` loop owned by `NDS::run_frame`. Today's Phase 0
 scaffold has a stub `Scheduler` that is just a `Cycle` counter with an
@@ -199,8 +199,8 @@ public:
 
 No exceptions are thrown from any scheduler method. Allocation failure from
 `std::vector::push_back` or `std::unordered_set::insert` terminates — the
-emulator has no recovery story for OOM and CLAUDE.md forbids exceptions in
-the hot path.
+emulator has no recovery story for OOM and the project style forbids
+exceptions in the hot path.
 
 ---
 

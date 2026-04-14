@@ -403,8 +403,6 @@ Before declaring 3b1 done:
       src/cpu/arm7/` is empty).
 - [ ] `arm7_decode_internal.hpp` is not included from any file outside
       `src/cpu/arm7/`.
-- [ ] No `Co-Authored-By` line in any commit introduced by this slice.
-- [ ] `CLAUDE.md` is still gitignored and untracked.
 - [ ] Fresh `NDS nds; nds.run_frame();` still does not crash.
 
 ## 10. Out-of-scope items still tracked for slice 3b2

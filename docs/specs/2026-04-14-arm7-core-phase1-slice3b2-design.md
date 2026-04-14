@@ -560,10 +560,10 @@ Same as 3b1: each test links against `ds_core` only (no SDL), compiles in millis
   - §ARM Opcodes: Multiply and Multiply-Accumulate
   - §ARM Opcodes: PSR Transfer (MRS, MSR)
 - ARM Architecture Reference Manual, ARMv4T section (historical reference for pipeline stage reads and UNPREDICTABLE definitions)
-- Slice 3b1 design: `docs/superpowers/specs/2026-04-14-arm7-core-phase1-slice3b1-design.md`
-- Slice 3a design: `docs/superpowers/plans/2026-04-13-arm7-core-phase1-slice3a.md`
-- Parent design spec: `docs/superpowers/specs/2026-04-12-nds-emulator-design.md` §4 (CPU), §13 (phase roadmap)
+- Slice 3b1 design: `docs/specs/2026-04-14-arm7-core-phase1-slice3b1-design.md`
+- Slice 3a design: `docs/plans/2026-04-13-arm7-core-phase1-slice3a.md`
+- Parent design spec: `docs/specs/2026-04-12-nds-emulator-design.md` §4 (CPU), §13 (phase roadmap)
 
 ---
 
-**End of Slice 3b2 design.** Next artifact: implementation plan at `docs/superpowers/plans/2026-04-14-arm7-core-phase1-slice3b2.md`, produced by the `writing-plans` skill.
+**End of Slice 3b2 design.** Next artifact: implementation plan at `docs/plans/2026-04-14-arm7-core-phase1-slice3b2.md`, produced by the `writing-plans` skill.

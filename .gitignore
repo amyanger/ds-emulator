@@ -34,5 +34,6 @@ dump_vram.bin
 savestate_*.bin
 stderr.log
 
-# Claude Code local context — never commit, never share
+# Local-only working docs — never commit, never share
 CLAUDE.md
+docs/plans/

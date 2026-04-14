@@ -875,7 +875,6 @@ unit tests run in milliseconds.
 ```
 ds-emulator/
 ├── CMakeLists.txt
-├── CLAUDE.md
 ├── README.md
 ├── LICENSE
 ├── .clang-format
@@ -886,7 +885,7 @@ ds-emulator/
 │   └── Sanitizers.cmake
 ├── docs/
 │   ├── architecture.md
-│   └── superpowers/specs/2026-04-12-nds-emulator-design.md
+│   └── specs/2026-04-12-nds-emulator-design.md
 ├── include/
 │   └── ds/
 │       ├── common.hpp
