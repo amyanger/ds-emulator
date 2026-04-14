@@ -140,9 +140,9 @@ u32 load_byte_signed(Arm7Bus& bus, u32 address) {
 }
 
 void store_halfword(Arm7Bus& bus, u32 address, u32 value) {
-    // Aligned path only — Task 11 adds the address[0]==1 mask behavior.
-    // We already mask defensively so an odd address still writes to the
-    // aligned halfword without crashing; Task 11 makes this explicit.
+    // Unaligned address: mask bit 0 and write the aligned halfword — no
+    // rotate, no exception. Both ARM7TDMI and melonDS define STRH this
+    // way (see ARMv4::DataWrite16 in src/ARM.cpp of melonDS).
     bus.write16(address & ~1u, static_cast<u16>(value & 0xFFFFu));
 }
 

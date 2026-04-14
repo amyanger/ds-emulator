@@ -2,10 +2,9 @@
 // tests. Task 4 covers the LDRH happy path (aligned addresses, both
 // offset forms, every P/U/W combination, zero-extension). Task 5 adds
 // STRH coverage: same addressing matrix, the low-16 truncation rule,
-// and the Rd==R15 pipeline quirk (reads as PC+12). Unaligned LDRH and
-// LDRSH behavior is pinned (matches melonDS — mask bit 0, read aligned
-// halfword, zero- or sign-extend; no rotate, no byte-read quirk). STRH
-// unaligned cases are deferred to a follow-up commit.
+// and the Rd==R15 pipeline quirk (reads as PC+12). Unaligned
+// LDRH/STRH/LDRSH behavior is pinned (matches melonDS — mask bit 0,
+// read or write the aligned halfword).
 
 #include "bus/arm7_bus.hpp"
 #include "cpu/arm7/arm7.hpp"
@@ -360,6 +359,49 @@ static void test_strh_rd_eq_r15_reads_pc_plus_12() {
     REQUIRE(nds.arm7_bus().read16(0x0380'0400u) == 0x000Cu);
 }
 
+// ---- Unaligned STRH (pinned: matches melonDS, mask bit 0) -----------------
+
+// STRH R0, [R1, #5]  — odd effective address 0x0380'0105. STRH masks
+// bit 0 on odd addresses and writes the aligned halfword — no rotate,
+// no exception (matches melonDS ARMv4::DataWrite16).
+static void test_strh_unaligned_odd_address_imm_masks_low_bit() {
+    NDS nds;
+    nds.cpu7().state().r[0] = 0xDEAD'BEEFu;
+    nds.cpu7().state().r[1] = 0x0380'0100u;
+    nds.arm7_bus().write16(0x0380'0104u, 0x0000u);  // clean slate
+    nds.arm7_bus().write16(0x0380'0106u, 0x0000u);  // clean slate
+
+    run_one(nds, kBase,
+            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/0,
+                                /*Rn*/1, /*Rd*/0, kSHhalf, /*off*/5));
+
+    REQUIRE(nds.arm7_bus().read16(0x0380'0104u) == 0xBEEFu);  // addr & ~1
+    REQUIRE(nds.arm7_bus().read16(0x0380'0106u) == 0x0000u);  // untouched
+    REQUIRE(nds.cpu7().state().r[0] == 0xDEAD'BEEFu);         // unchanged
+    REQUIRE(nds.cpu7().state().r[1] == 0x0380'0100u);         // unchanged
+}
+
+// STRH R0, [R1, R2]  — odd effective address via register offset. Same
+// rule: mask bit 0, write the aligned halfword (matches melonDS).
+static void test_strh_unaligned_odd_address_reg_masks_low_bit() {
+    NDS nds;
+    nds.cpu7().state().r[0] = 0xCAFE'BABEu;
+    nds.cpu7().state().r[1] = 0x0380'0200u;
+    nds.cpu7().state().r[2] = 0x0000'0001u;
+    nds.arm7_bus().write16(0x0380'0200u, 0x0000u);  // clean slate
+    nds.arm7_bus().write16(0x0380'0202u, 0x0000u);  // clean slate
+
+    run_one(nds, kBase,
+            encode_halfword_reg(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/0,
+                                /*Rn*/1, /*Rd*/0, kSHhalf, /*Rm*/2));
+
+    REQUIRE(nds.arm7_bus().read16(0x0380'0200u) == 0xBABEu);  // addr & ~1
+    REQUIRE(nds.arm7_bus().read16(0x0380'0202u) == 0x0000u);  // untouched
+    REQUIRE(nds.cpu7().state().r[0] == 0xCAFE'BABEu);         // unchanged
+    REQUIRE(nds.cpu7().state().r[1] == 0x0380'0200u);         // unchanged
+    REQUIRE(nds.cpu7().state().r[2] == 0x0000'0001u);         // unchanged
+}
+
 // ---- LDRSB cases ----------------------------------------------------------
 
 // LDRSB R0, [R1]  — positive byte (bit 7 clear). Must zero-extend
@@ -681,6 +723,8 @@ int main() {
     test_strh_reg_preindex_up_no_writeback();
     test_strh_only_low_16_bits_written();
     test_strh_rd_eq_r15_reads_pc_plus_12();
+    test_strh_unaligned_odd_address_imm_masks_low_bit();
+    test_strh_unaligned_odd_address_reg_masks_low_bit();
 
     test_ldrsb_positive_byte();
     test_ldrsb_negative_byte_sign_extended();
