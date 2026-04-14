@@ -167,21 +167,4 @@ u32 dispatch_dp(Arm7State& state, u32 instr, u32 instr_addr) {
     return 1;
 }
 
-// ---- temporary stubs for tasks 2+ ----
-// These are replaced with real implementations in Task 3 (branch) and
-// Task 5 (load/store). Kept here only to make the decoder refactor a
-// self-contained green-tests commit.
-
-u32 dispatch_branch(Arm7State& /*state*/, u32 instr) {
-    DS_LOG_WARN("arm7: branch form 0x%08X (stub)", instr);
-    return 1;
-}
-
-u32 dispatch_single_data_transfer(Arm7State& /*state*/, Arm7Bus& /*bus*/,
-                                  u32 instr, u32 instr_addr) {
-    DS_LOG_WARN("arm7: single-data-transfer form 0x%08X at 0x%08X (stub)",
-                instr, instr_addr);
-    return 1;
-}
-
 }  // namespace ds
