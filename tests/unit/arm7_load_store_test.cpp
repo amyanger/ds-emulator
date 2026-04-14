@@ -128,6 +128,21 @@ static void ldr_pre_index_no_writeback_keeps_rn() {
     REQUIRE(nds.cpu7().state().r[1] == kData);
 }
 
+static void ldr_post_index_uses_base_then_updates_rn() {
+    NDS nds;
+    nds.cpu7().state().r[1] = kData;
+    nds.arm7_bus().write32(kData, 0x1111'2222u);       // at base
+    nds.arm7_bus().write32(kData + 4, 0x3333'4444u);   // at base + 4
+
+    // LDR R0, [R1], #4          (post-index: access base, then Rn += 4)
+    // cond=AL, 01, I=0, P=0, U=1, B=0, W=0, L=1, Rn=1, Rd=0, imm12=4
+    // -> 1110 0100 1001 0001 0000 0000 0000 0100 = 0xE491'0004
+    run_one(nds, 0xE491'0004u);
+
+    REQUIRE(nds.cpu7().state().r[0] == 0x1111'2222u);  // loaded from base, not base+4
+    REQUIRE(nds.cpu7().state().r[1] == kData + 4u);    // Rn updated after
+}
+
 int main() {
     ldr_word_imm_offset_loads_value();
     str_word_imm_offset_stores_value();
@@ -136,6 +151,7 @@ int main() {
     ldr_word_u0_subtracts_offset();
     ldr_pre_index_writeback_updates_rn();
     ldr_pre_index_no_writeback_keeps_rn();
+    ldr_post_index_uses_base_then_updates_rn();
     std::puts("arm7_load_store_test OK");
     return 0;
 }
