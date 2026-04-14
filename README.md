@@ -6,7 +6,6 @@
 [![CMake](https://img.shields.io/badge/CMake-3.20%2B-064F8C?logo=cmake&logoColor=white)](https://cmake.org/)
 [![SDL2](https://img.shields.io/badge/SDL-2-blue)](https://www.libsdl.org/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-black?logo=apple&logoColor=white)](#-apple-silicon)
-[![Status](https://img.shields.io/badge/status-Phase%200%20%E2%9C%85-brightgreen)](#-current-status)
 [![License](https://img.shields.io/badge/license-TBD-lightgrey)](#)
 
 ---
@@ -21,27 +20,7 @@ A solo project to build a Nintendo DS emulator from scratch in modern C++. The p
 - ⚫ Pokémon **Black / White**
 - ⚫ Pokémon **Black 2 / White 2**
 
-This is the follow-up to my [GBA emulator](https://github.com/amyanger) — but the DS is a *fundamentally* more complex machine, so this isn't a port. It's been re-architected from the hardware up.
-
----
-
-## 🚧 Current Status
-
-**Phase 0 — Scaffolding ✅ Complete**
-
-The foundation is in place. The build system works, the project skeleton is laid out, the foundational utility types (`Fixed<I, F>`, `CircularBuffer<T, N>`) are implemented and unit-tested, and an SDL2 window opens with the two-screen DS layout showing a test pattern. The hardware emulation itself starts in Phase 1.
-
-```text
-Phase 0 — Scaffolding                          ✅ DONE
-Phase 1 — CPUs + bus + memory + direct boot    🔜 NEXT
-Phase 2 — 2D PPU + first pixels                📋 planned
-Phase 3 — Input + audio + saves                📋 planned
-Phase 4 — 3D engine (geometry + rasterizer)    📋 planned
-Phase 5 — Polish + accuracy + full compat      📋 planned
-Phase 6 — Performance + tooling                📋 planned
-```
-
-Each phase has a concrete ROM-boot milestone (e.g. *Phase 2 ships when HG/SS title screen renders correctly*). Estimated timeline to all six Pokémon games playable: **4.5–7.5 months** of focused solo work.
+The DS is a fundamentally more complex machine than the GBA — two CPUs on two bus domains, runtime-banked VRAM, a 3D engine, and scheduler-driven timing. So this isn't a port of anything. It's architected from the hardware up.
 
 ---
 
@@ -49,16 +28,33 @@ Each phase has a concrete ROM-boot milestone (e.g. *Phase 2 ships when HG/SS tit
 
 The DS isn't "GBA + more" — it's a fundamentally different machine, so the architecture starts from scratch:
 
-- 🧠 **Two CPUs** on **two bus domains** — ARM9 (ARMv5TE @ 67 MHz, with caches + TCM) and ARM7 (ARMv4T @ 33 MHz)
-- ⏱️ **Single central event scheduler** (min-heap of timed events) drives everything — no scanline-chunk loop
-- 🎨 **Two 2D PPU engines** (main + sub) sharing one class via a flag
-- 📐 **Two-stage 3D pipeline** — geometry engine → `Frame3D` struct → software rasterizer (with the door open for a hardware backend later)
-- 🧩 **Runtime-reconfigurable VRAM** modeled as 9 banks + per-consumer page tables rebuilt on `VRAMCNT` writes
-- 🔌 **Direct boot only** — no BIOS, no firmware dumps required; the cart's KEY1 decryption is handled by a hardcoded seed table + minimal HLE
-- 🪟 **Three CMake targets**: `ds_core` (platform-free), `ds_frontend` (the only SDL-aware code), and `ds_emulator` (the binary)
-- 🩻 **Staged in-emulator debug overlay** (`DsXray`) — page-cycled real-time view of CPU state, VRAM bank map, geometry FIFO, scheduler events, etc.
+- 🧠 **Two CPUs on two bus domains** — ARM9 (ARMv5TE @ 67 MHz, with caches + TCM) and ARM7 (ARMv4T @ 33 MHz). Each CPU has its own `Bus` object modeling its view of memory.
+- ⏱️ **Single central event scheduler** (min-heap of timed events) drives everything. Nothing advances time except `scheduler.run_until(t)` — no scanline-chunk loop, no per-subsystem clocks.
+- 🎨 **Two 2D PPU engines** (main + sub) sharing one class via an `is_main` flag — four BG modes, sprite engine, windowing, blending, master brightness.
+- 📐 **Two-stage 3D pipeline** — geometry engine → `Frame3D` hand-off struct → software rasterizer, with post-processing passes for edge marking, fog, and toon/highlight. The door is deliberately left open for a hardware backend later.
+- 🧩 **Runtime-reconfigurable VRAM** modeled as 9 independently-mapped banks (A–I) plus per-consumer page tables that are rebuilt on `VRAMCNT` writes.
+- 🔊 **SPU on the ARM7 side** — 16 channels (PCM8 / PCM16 / IMA-ADPCM / PSG / noise) plus sound capture units.
+- 🔌 **Direct boot only** — no BIOS, no firmware dumps required. The cart's KEY1 decryption is handled by a hardcoded seed table, and BIOS SWIs are provided by a minimal HLE layer.
+- 🪟 **Three CMake targets**: `ds_core` (platform-free), `ds_frontend` (the only SDL-aware code), and `ds_emulator` (the binary). Unit tests link `ds_core` only — no SDL, no window.
+- 🩻 **In-emulator X-Ray debug overlay** — page-cycled real-time view of CPU state, bus page tables, VRAM bank map, OAM, palette, geometry FIFO, polygon list, scheduler events, IPC state, and SPU channels.
 
-> 📐 **Full architecture spec:** [`docs/superpowers/specs/2026-04-12-nds-emulator-design.md`](docs/superpowers/specs/2026-04-12-nds-emulator-design.md) (16 sections, ~1000 lines)
+> 📐 **Full architecture spec:** [`docs/superpowers/specs/2026-04-12-nds-emulator-design.md`](docs/superpowers/specs/2026-04-12-nds-emulator-design.md) — the source of truth for every design decision, ~1000 lines across 16 sections.
+
+---
+
+## 🏛️ Non-Negotiable Architecture Rules
+
+These come straight from the design spec and are enforced in code review:
+
+1. ⏱️ **The scheduler is the clock.** Nothing advances time except `scheduler.run_until(t)`. Subsystems never sleep, wait, or run their own time loops.
+2. 🧠 **Two bus domains, not one.** ARM9 and ARM7 each model their own view of memory. The same physical address can mean different things to each CPU.
+3. 🌳 **No subsystem holds a pointer to another subsystem.** All cross-subsystem access goes through `NDS&`. The dependency graph is a tree.
+4. 🔌 **I/O is routed per-bus.** ARM9 I/O and ARM7 I/O are different tables.
+5. 💾 **Every subsystem implements `reset()`, `save_state()`, `load_state()`** from day one. Save states are not a bolt-on.
+6. 🪟 **`class NDS` has no `<SDL.h>` in its transitive include graph.** Core is platform-free; this is enforced at link time.
+7. 📁 **One hardware component per file.** When a file exceeds ~800 lines, split it by concern.
+8. 🧮 **`Fixed<I, F>` for all 3D math.** Raw `int32_t` in the geometry pipeline is a code review block.
+9. 🚀 **Direct boot only.** No BIOS / firmware dumps. If you want to load `bios9.bin`, you're solving the wrong problem — add the missing SWI to the HLE layer instead.
 
 ---
 
@@ -85,27 +81,17 @@ make
 ### ▶️ Run
 
 ```bash
-./ds_emulator                # opens the test pattern window
-./ds_emulator --scale 3      # 3x window scale
-./ds_emulator --frames 30    # auto-quit after 30 frames (for testing)
+./ds_emulator <rom.nds>             # boot a ROM
+./ds_emulator <rom.nds> --scale 3   # 3x window scale
 ```
 
-> ℹ️ Phase 0 only opens a window with a test pattern. The cart loader and game boot path land in Phase 1+.
+ROMs go in `roms/`. Saves are written to `saves/<game_code>.sav` automatically. No BIOS or firmware required.
 
 ### 🧪 Tests
 
 ```bash
 cd build
 ctest --output-on-failure
-```
-
-```text
-    Start 1: fixed_test
-1/2 Test #1: fixed_test .......................   Passed
-    Start 2: ring_buffer_test
-2/2 Test #2: ring_buffer_test .................   Passed
-
-100% tests passed, 0 tests failed out of 2
 ```
 
 Unit tests link against `ds_core` only — no SDL, no window, runs in milliseconds.
@@ -125,15 +111,15 @@ make
 When enabled, this turns on:
 
 - 🛠️ `-mcpu=apple-m1` clang tuning
-- 🎯 NEON SIMD rasterizer paths *(Phase 6 — placeholder for now)*
+- 🎯 NEON SIMD rasterizer paths
 - 🧵 `QOS_CLASS_USER_INTERACTIVE` thread attribute (keeps the emulator off efficiency cores)
-- 🔐 Codesign / JIT entitlement scaffolding *(unused until a JIT backend lands in Phase 6+)*
+- 🔐 Codesign / JIT entitlement scaffolding
 
 The default build stays portable across macOS arm64, macOS x86_64, Linux, and Windows. Apple-specific code is confined to `src/frontend/platform/macos.cpp` and `src/gpu3d/simd_neon.cpp` — nothing else uses `#ifdef __APPLE__`.
 
 ---
 
-## 🎮 Controls *(planned, lands in Phase 3)*
+## 🎮 Controls
 
 | NDS Button         | Default Key      |
 |--------------------|------------------|
@@ -176,27 +162,34 @@ Rebindable via `keybinds.cfg`. MFi / Xbox / DualSense controllers auto-detected 
 
 ```
 ds-emulator/
-├── 📐 docs/superpowers/
-│   ├── specs/2026-04-12-nds-emulator-design.md     ← THE design spec (16 sections)
-│   └── plans/2026-04-12-phase-0-scaffolding.md     ← Phase 0 task plan
-├── 🛠️ cmake/                                       ← Build helpers
+├── 📐 docs/superpowers/specs/        ← Design spec (source of truth)
+├── 🛠️ cmake/                         ← Build helpers
 │   ├── CompilerWarnings.cmake
 │   ├── AppleSilicon.cmake
 │   └── Sanitizers.cmake
-├── 📦 include/ds/                                   ← Cross-cutting types
+├── 📦 include/ds/                    ← Cross-cutting types
 │   ├── common.hpp
-│   ├── fixed.hpp                                   ← templated Fixed<I, F>
-│   └── ring_buffer.hpp                             ← CircularBuffer<T, N>
+│   ├── fixed.hpp                     ← templated Fixed<I, F>
+│   └── ring_buffer.hpp               ← CircularBuffer<T, N>
 ├── ⚙️ src/
-│   ├── main.cpp                                    ← Entry point
-│   ├── nds.hpp / nds.cpp                           ← Top-level system
-│   ├── scheduler/                                  ← Min-heap event scheduler
+│   ├── main.cpp                      ← Entry point
+│   ├── nds.hpp / nds.cpp             ← Top-level system
+│   ├── scheduler/                    ← Min-heap event scheduler
 │   ├── cpu/
-│   │   ├── arm9/                                   ← ARMv5TE core (Phase 1)
-│   │   └── arm7/                                   ← ARMv4T core (Phase 1)
-│   └── frontend/                                   ← SDL2 — only place SDL is allowed
-├── 🧪 tests/unit/                                  ← Unit tests (link ds_core only)
-└── 📜 CLAUDE.md                                    ← Project conventions
+│   │   ├── arm9/                     ← ARMv5TE core
+│   │   ├── arm7/                     ← ARMv4T core
+│   │   └── bios/                     ← HLE SWI handlers
+│   ├── bus/                          ← ARM9 + ARM7 bus page tables
+│   ├── memory/vram/                  ← 9-bank VRAM controller
+│   ├── ppu/                          ← 2D engines (main + sub)
+│   ├── gpu3d/                        ← 3D geometry + rasterizer
+│   ├── spu/                          ← 16-channel sound processor
+│   ├── dma/ timer/ ipc/ interrupt/   ← Supporting hardware
+│   ├── cartridge/                    ← Slot-1 bus + KEY1 + saves
+│   └── frontend/                     ← SDL2 — only place SDL is allowed
+│       └── xray/                     ← In-emulator debug overlay
+├── 🧪 tests/                         ← Unit tests (link ds_core only)
+└── 📜 CLAUDE.md                      ← Project conventions
 ```
 
 ---
@@ -206,55 +199,7 @@ ds-emulator/
 | Document | What it is |
 |----------|-----------|
 | 🏛️ [Architecture Spec](docs/superpowers/specs/2026-04-12-nds-emulator-design.md) | Full design — 16 sections covering every subsystem |
-| 📋 [Phase 0 Plan](docs/superpowers/plans/2026-04-12-phase-0-scaffolding.md) | Step-by-step implementation plan for the scaffolding phase |
-| 📜 [CLAUDE.md](CLAUDE.md) | Project conventions, code style, hardware quirks, and the non-negotiable architecture rules |
-
----
-
-## 🛣️ Roadmap
-
-### ✅ Phase 0 — Scaffolding *(complete)*
-Window opens, test pattern displays, build system and project skeleton in place, foundational utility types implemented and tested.
-
-### 🔜 Phase 1 — CPUs, bus, memory, direct boot *(next)*
-Full ARM9 (ARMv5TE) and ARM7 (ARMv4T) decoders, CP15 + TCM, dual bus domains with page tables, raw memory + `VramController` skeleton, 8-channel DMA, 8 timers, 2 IRQ controllers, IPC sync + FIFO, HLE BIOS SWIs, direct-boot path with KEY1 cart decryption, real scheduler.
-> 🎯 **Milestone:** Pokémon HeartGold executes past cart boot to its ARM9 entry point and runs several frames without crashing. *No pixels yet — verified via instruction trace.*
-
-### 📋 Phase 2 — 2D PPU
-Both 2D engines, all 4 BG modes, sprite engine, compositor, real VRAM bank routing.
-> 🎯 **Milestone:** HG/SS title screen renders correctly with the Lugia animation.
-
-### 📋 Phase 3 — Input + audio + saves
-SPU (16 channels), keypad, touchscreen, audio output, EEPROM + FLASH saves.
-> 🎯 **Milestone:** HG/SS playable from title to walking around New Bark Town with music and SFX. Save and reload work.
-
-### 📋 Phase 4 — 3D engine *(the big one)*
-Geometry engine, software rasterizer, edge marking, fog, toon shading.
-> 🎯 **Milestone:** HG/SS first wild Pokémon battle renders correctly. *(Both Pokémon as 3D models.)*
-
-### 📋 Phase 5 — Polish + Gen 5 compatibility
-Save states, rewind, RTC, cache timing, BW / BW2 fixes.
-> 🎯 **Milestone:** All six target Pokémon games playable to first gym, 30+ minutes without crashes.
-
-### 📋 Phase 6 — Performance + tooling
-NEON SIMD rasterizer, GDB stub, headless regression tests, optional cached interpreter / JIT, optional hardware 3D backend.
-> 🎯 **Milestone:** HG/SS at full speed on M-series Macs, full main story playable end to end.
-
----
-
-## 🏛️ Non-Negotiable Architecture Rules
-
-These come straight from the design spec and are enforced in code review:
-
-1. ⏱️ **The scheduler is the clock.** Nothing advances time except `scheduler.run_until(t)`.
-2. 🧠 **Two bus domains, not one.** ARM9 and ARM7 each model their own view of memory.
-3. 🌳 **No subsystem holds a pointer to another subsystem.** All cross-subsystem access goes through `NDS&`.
-4. 🔌 **I/O is routed per-bus.** ARM9 I/O and ARM7 I/O are different tables.
-5. 💾 **Every subsystem implements `reset()`, `save_state()`, `load_state()`** from day one.
-6. 🪟 **`class NDS` has no `<SDL.h>` in its transitive include graph.** Core is platform-free; this is enforced at link time.
-7. 📁 **One hardware component per file.** When a file exceeds ~800 lines, split.
-8. 🧮 **`Fixed<I, F>` for all 3D math.** Raw `int32_t` in the geometry pipeline is a code review block.
-9. 🚀 **Direct boot only.** No BIOS / firmware dumps. Add missing SWIs to the HLE layer instead.
+| 📜 [CLAUDE.md](CLAUDE.md) | Project conventions, code style, hardware quirks, and non-negotiable architecture rules |
 
 ---
 
@@ -289,9 +234,5 @@ Direct boot is implemented from publicly documented hardware behavior. Users sup
 Built standing on the shoulders of giants: the GBATEK authors who reverse-engineered the DS hardware, the melonDS and DeSmuME teams for showing what's possible, and the gbadev / nds-dev homebrew communities for keeping the knowledge alive.
 
 ---
-
-## 📬 Status
-
-🚧 **Active development.** This is a personal hobby project — slow, methodical, and built phase-by-phase against verifiable Pokémon ROM milestones. Watch / star to follow along.
 
 > 💡 *"You don't really understand a machine until you've tried to emulate it."*
