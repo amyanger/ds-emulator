@@ -57,9 +57,38 @@ u32 dispatch_psr_transfer(Arm7State& state, u32 instr, u32 /*instr_addr*/) {
         return 1;
     }
 
-    // MSR path — filled in by Tasks 10..13.
-    DS_LOG_WARN("arm7: MSR not yet implemented, instr 0x%08X at 0x%08X",
-                instr, state.pc);
+    // --- MSR path: compute source value ---
+    const bool i_bit = ((instr >> 25) & 1u) != 0;
+    u32 source;
+    if (i_bit) {
+        const u32 imm8   = instr & 0xFFu;
+        const u32 rotate = (instr >> 8) & 0xFu;
+        const bool c_in  = (state.cpsr & (1u << 29)) != 0;
+        source = rotated_imm(imm8, rotate, c_in).value;
+    } else {
+        source = state.r[instr & 0xFu];
+    }
+
+    // Build byte mask from bits[19:16] (the "_fsxc" field).
+    u32 byte_mask = 0;
+    if (instr & (1u << 19)) byte_mask |= 0xFF000000u;  // f (flags byte)
+    if (instr & (1u << 18)) byte_mask |= 0x00FF0000u;  // s (reserved on v4T)
+    if (instr & (1u << 17)) byte_mask |= 0x0000FF00u;  // x (reserved on v4T)
+    if (instr & (1u << 16)) byte_mask |= 0x000000FFu;  // c (control byte)
+
+    // SPSR writes land in Task 12 — for now, warn and no-op.
+    if (use_spsr) {
+        DS_LOG_WARN("arm7: MSR SPSR not yet implemented, instr 0x%08X at 0x%08X",
+                    instr, state.pc);
+        return 1;
+    }
+
+    // CPSR merge: write only the masked bytes from `source`, leave the
+    // rest unchanged. Mode-bit change handling (and the switch_mode() call)
+    // lands in Task 13. For Task 10, we do the raw merge; the Task 10
+    // tests deliberately stay in a single mode so the merge matches what
+    // Task 13 will produce.
+    state.cpsr = (state.cpsr & ~byte_mask) | (source & byte_mask);
     return 1;
 }
 
