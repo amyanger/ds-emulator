@@ -218,6 +218,62 @@ static void smulls_negative_product_sets_n() {
     REQUIRE((nds.cpu7().state().cpsr & (1u << 30)) == 0);  // Z clear
 }
 
+static void umlal_plain_accumulate() {
+    // RdHi:RdLo starts at 0x00000000_00000100
+    // product = 2 * 3 = 6
+    // result  = 0x00000000_00000106
+    NDS nds;
+    nds.cpu7().state().r[0] = 0x00000100u;  // RdLo pre-load
+    nds.cpu7().state().r[1] = 0x00000000u;  // RdHi pre-load
+    nds.cpu7().state().r[2] = 2u;
+    nds.cpu7().state().r[3] = 3u;
+    run_one(nds, kBase, encode_long_mul(false, true, false, 1, 0, 2, 3));
+    REQUIRE(nds.cpu7().state().r[0] == 0x00000106u);
+    REQUIRE(nds.cpu7().state().r[1] == 0x00000000u);
+}
+
+static void umlal_carry_propagates_lo_to_hi() {
+    // RdLo pre-load = 0xFFFFFFFF
+    // RdHi pre-load = 0x00000000
+    // product = 1 * 2 = 2
+    // accumulate: 0x00000000_FFFFFFFF + 2 = 0x00000001_00000001
+    NDS nds;
+    nds.cpu7().state().r[0] = 0xFFFFFFFFu;
+    nds.cpu7().state().r[1] = 0x00000000u;
+    nds.cpu7().state().r[2] = 1u;
+    nds.cpu7().state().r[3] = 2u;
+    run_one(nds, kBase, encode_long_mul(false, true, false, 1, 0, 2, 3));
+    REQUIRE(nds.cpu7().state().r[0] == 0x00000001u);
+    REQUIRE(nds.cpu7().state().r[1] == 0x00000001u);
+}
+
+static void smlal_signed_negative_accumulator() {
+    // RdHi:RdLo starts at 0xFFFFFFFF_FFFFFFFF == -1 (signed)
+    // product = (-1) * 1 = -1 == 0xFFFFFFFF_FFFFFFFF
+    // sum = -2 == 0xFFFFFFFF_FFFFFFFE
+    NDS nds;
+    nds.cpu7().state().r[0] = 0xFFFFFFFFu;
+    nds.cpu7().state().r[1] = 0xFFFFFFFFu;
+    nds.cpu7().state().r[2] = 0xFFFFFFFFu;  // -1
+    nds.cpu7().state().r[3] = 0x00000001u;  //  1
+    run_one(nds, kBase, encode_long_mul(true, true, false, 1, 0, 2, 3));
+    REQUIRE(nds.cpu7().state().r[0] == 0xFFFFFFFEu);
+    REQUIRE(nds.cpu7().state().r[1] == 0xFFFFFFFFu);
+}
+
+static void smlals_flag_reflects_full_64_bit_result() {
+    // Accumulator starts at 0, product = -1 * 1 = -1.
+    // Final 64-bit result = 0xFFFFFFFFFFFFFFFF. N set (bit 63), Z clear.
+    NDS nds;
+    nds.cpu7().state().r[0] = 0x00000000u;
+    nds.cpu7().state().r[1] = 0x00000000u;
+    nds.cpu7().state().r[2] = 0xFFFFFFFFu;  // -1
+    nds.cpu7().state().r[3] = 0x00000001u;
+    run_one(nds, kBase, encode_long_mul(true, true, true, 1, 0, 2, 3));
+    REQUIRE((nds.cpu7().state().cpsr & (1u << 31)) != 0);  // N set (bit 63)
+    REQUIRE((nds.cpu7().state().cpsr & (1u << 30)) == 0);  // Z clear
+}
+
 int main() {
     mul_plain_small_operands();
     mul_overflow_low32_truncates();
@@ -235,6 +291,10 @@ int main() {
     smull_negative_times_one_is_negative();
     smull_int_min_squared();
     smulls_negative_product_sets_n();
-    std::puts("arm7_multiply_test: all 16 cases passed");
+    umlal_plain_accumulate();
+    umlal_carry_propagates_lo_to_hi();
+    smlal_signed_negative_accumulator();
+    smlals_flag_reflects_full_64_bit_result();
+    std::puts("arm7_multiply_test: all 20 cases passed");
     return 0;
 }
