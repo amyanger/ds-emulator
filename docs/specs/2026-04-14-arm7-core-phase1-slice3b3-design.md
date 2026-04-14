@@ -80,11 +80,13 @@ dispatch_dp:
     1. BX recognizer                 (bits[27:4] == 0x12FFF1)
     2. PSR-transfer recognizer       (TST/TEQ/CMP/CMN with S=0 pattern)
     3. Multiply recognizer           (bits[27:22] == 0 && bits[7:4] == 0b1001)
-    4. Halfword recognizer           (bits[27:25] == 000 && bit[7] == 1 && bit[4] == 1)    ← NEW
+    4. Halfword recognizer           (bit[25] == 0 && bit[7] == 1 && bit[4] == 1)           ← NEW
     5. Data-processing body          (imm-shift and reg-shift forms)
 ```
 
-**Important:** multiply's `bits[7:4] == 0b1001` and halfword's `bits[7:4] ∈ {1011, 1101, 1111}` share bit 4 and bit 7. The recognizers must check the full 4-bit pattern in the right order, not just `bit[4] && bit[7]`. Multiply goes first because its pattern is strictly more specific (all four bits fixed at `1001`), halfword next because its pattern matches anything with `bit[4]==1`, `bit[7]==1`, `(bit[5] || bit[6])`.
+**Important:** `dispatch_arm`'s primary fan-out routes **both** `bits[27:25]==000` **and** `bits[27:25]==001` to `dispatch_dp`. The `001` case is immediate-form DP, where bits[11:0] are a rotated 8-bit immediate and bit[4]/bit[7] are just bits of that immediate — they have nothing to do with the halfword extension space. The halfword recognizer **must gate on `bit[25] == 0`** before checking `bit[4] && bit[7]`, otherwise it false-matches on any immediate-form DP instruction whose immediate value happens to have those bits set (e.g. `AND R0,R1,#0xFF` encodes as `0xE201'00FF`, which has bit[4]=1 and bit[7]=1 in the 8-bit immediate field).
+
+Multiply's recognizer already fingerprints on the stricter `bits[27:22] == 0 && bits[7:4] == 0b1001` pattern and is safe against the `001` false-match concern. Halfword's recognizer needs the explicit I-bit gate.
 
 ### 4.2 New header declarations and bus threading
 
@@ -129,8 +131,11 @@ const bool u = (instr & (1u << 23)) != 0;   // up/down
 const bool i = (instr & (1u << 22)) != 0;   // immediate (1) vs register (0) offset
 const bool w = (instr & (1u << 21)) != 0;   // writeback (pre-index only)
 
-// Rn read as PC+8 when Rn == 15, consistent with LDR/STR.
-const u32 rn_value = (rn == 15) ? (state.r[15] + 4) : state.r[rn];
+// Rn == 15 reads as PC+8 (GBATEK: "R15=PC+8" for Rn in halfword transfers).
+// Arm7::step_arm already sets state.r[15] = instr_addr + 8 before dispatch,
+// so a plain state.r[rn] read gives the right value for both r15 and r0-r14.
+// Matches the LDR/STR convention in arm7_loadstore.cpp.
+const u32 rn_value = state.r[rn];
 
 u32 offset;
 if (i) {
@@ -144,11 +149,13 @@ if (i) {
                     state.pc);
     }
     // Rm == 15 is UNPREDICTABLE per GBATEK ("R0-R14, not including R15").
+    // When it happens, use state.r[15] (pre-pipeline-adjusted to PC+8)
+    // for determinism.
     if (rm == 15) {
         DS_LOG_WARN("arm7: halfword register offset Rm == 15 (unpredictable) at 0x%08X",
                     state.pc);
     }
-    offset = (rm == 15) ? (state.r[15] + 4) : state.r[rm];
+    offset = state.r[rm];
 }
 
 const u32 signed_offset = u ? (rn_value + offset) : (rn_value - offset);
@@ -296,21 +303,25 @@ GBATEK note: *"STRH, LDRH, LDRSB, LDRSH supported on ARMv4 and up. STRD/LDRD sup
 
 ```cpp
 // Halfword recognizer — inside dispatch_dp, after multiply check.
-// Pattern: bits[27:25] == 000 && bit[7] == 1 && bit[4] == 1 && (bit[6] | bit[5]) != 0
 //
-// Bit 4 and bit 7 set distinguishes from DP imm-shift (bit 4 == 0)
-// and DP reg-shift (bit 7 == 0). The (bit[6] | bit[5]) != 0 check
-// excludes multiply (SH=00) and SWP (also SH=00 but caught by multiply's
-// more specific bits[24:23]==00 check; left as a warn path here to be
-// safe — real SWP decode lands in a later slice).
-const bool bit4 = (instr & (1u << 4)) != 0;
-const bool bit7 = (instr & (1u << 7)) != 0;
-if (bit4 && bit7) {
-    return dispatch_halfword(state, instr, instr_addr);
+// Mandatory gate: bit[25] == 0 (I=0, register-form subspace).
+// dispatch_arm routes both bits[27:25]==000 and ==001 to dispatch_dp;
+// the 001 case is immediate-form DP where bit[4]/bit[7] are just bits
+// of the rotated 8-bit immediate, not the halfword shape field. Without
+// the I-bit gate the recognizer false-matches any DP imm whose
+// immediate has those two bits set.
+//
+// Halfword pattern (post-gate): bit[4] == 1 && bit[7] == 1, covering
+// halfword (SH != 00) and SWP (SH == 00, warn path inside
+// dispatch_halfword — real SWP decode lands in a later slice).
+if ((instr & (1u << 25)) == 0
+    && (instr & (1u << 4)) != 0
+    && (instr & (1u << 7)) != 0) {
+    return dispatch_halfword(state, bus, instr, instr_addr);
 }
 ```
 
-Note: bit 4 and bit 7 both being set is the halfword/SWP/multiply extension space marker. Multiply's recognizer already peeled off at the prior check (it fingerprinted on `bits[27:22] == 0` and `bits[7:4] == 0b1001`), so by the time we reach the halfword check, `bit4 && bit7` uniquely implies halfword-or-SWP, and `dispatch_halfword` handles both (SWP as a warn).
+Note: multiply's recognizer already peeled off its own pattern (`bits[27:22]==0 && bits[7:4]==1001`), which is a strict subset of the halfword I=0 gate, so by the time we reach the halfword check, the remaining `bit[25]==0 && bit[4] && bit[7]` space contains only halfword (SH=01/10/11) and SWP (SH=00 + `bits[7:4]==1001`, handled as a warn inside `dispatch_halfword`).
 
 ### 5.3 Addressing mode table
 
@@ -332,39 +343,41 @@ GBATEK is silent on unaligned halfword behavior in this section. These rules com
 
 #### 5.4.1 `LDRH` with `address[0] == 1`
 
-On ARM7TDMI, an unaligned halfword load rotates the loaded halfword right by 8 bits (same family of behavior as unaligned word loads with their 0/8/16/24 rotate).
+**Decision (implemented):** mask bit 0, read the aligned halfword, zero-extend to 32. No rotate.
 
-Concretely:
 ```
-raw16 = bus.read16(address & ~1u)
-result = (raw16 >> 8) | ((raw16 & 0xFF) << 24)    // rotate-right-by-8 of a 16-bit value, padded
-// Then zero-extend to 32. The resulting Rd has the odd-address byte in bit 0..7
-// and the even-address byte in bits 24..31, with 0 in the middle. Games should
-// not do this; compilers do not emit it; but melonDS models it for robustness.
+result = zero_extend_16_to_32(bus.read16(address & ~1u))
 ```
 
-**Action:** cross-reference melonDS's `ARM::A_LDRH` at implementation time. If melonDS implements something different, match melonDS (it is the reference emulator). Document the final choice in the implementation file.
+The ARM7TDMI TRM documents a rotate-by-8 quirk where the odd-address byte lands in bits 0..7 and the even-address byte lands in bits 24..31. We **do not** model it. Cross-reference at implementation time found that melonDS's `ARMv4::DataRead16` (`src/ARM.cpp`) and `A_LDRH` (`src/ARMInterpreter_LoadStore.cpp`) both do a plain `addr &= ~1; BusRead16(addr)` with no rotate. Per the §5.4 tie-breaker rule ("match melonDS"), we match the reference emulator rather than the TRM.
+
+Rationale for the divergence: no compiler emits unaligned halfword access, and no shipped NDS game is known to rely on the rotate. Modelling a behavior no software triggers costs code and adds a divergence surface against the reference emulator.
+
+Pinned in the test suite: `test_ldrh_unaligned_odd_address_imm_masks_low_bit` and `test_ldrh_unaligned_odd_address_reg_masks_low_bit`. Sentinels chosen so a regression toward the TRM rotate would produce an observably different value.
 
 #### 5.4.2 `LDRSH` with `address[0] == 1`
 
-On ARM7TDMI, an unaligned signed halfword load behaves as **`LDRSB` of the odd byte**. The hardware reads a single byte at the given (odd) address and sign-extends that byte, ignoring the halfword interpretation entirely.
+**Decision (implemented):** mask bit 0, read the aligned halfword, sign-extend as signed-16 to 32. No byte-read degeneration.
 
 ```
-raw8 = bus.read8(address)               // NOTE: read8, not read16
-result = sign_extend_8_to_32(raw8)
+result = sign_extend_16_to_32(bus.read16(address & ~1u))
 ```
 
-This is a real ARM7TDMI quirk and a common source of bugs in ports to ARMv5+, because ARMv5 made this UNPREDICTABLE.
+The ARM7TDMI TRM documents an odd-address quirk where `LDRSH` degenerates to **`LDRSB` of the single odd byte** (ARMv5 later made this UNPREDICTABLE). We **do not** model it. melonDS's `A_LDRSH` calls the same `DataRead16` path followed by `(s32)(s16)` sign-extension, with no byte-read branch. Per the §5.4 tie-breaker rule, we match the reference emulator.
 
-**Action:** same — cross-reference melonDS at implementation time.
+Pinned in the test suite: `test_ldrsh_unaligned_odd_address_imm_masks_low_bit` (sentinel `0x80F0` → `0xFFFF'80F0`) and `test_ldrsh_unaligned_odd_address_reg_masks_low_bit` (sentinel `0x8001` → `0xFFFF'8001`). Both sentinels were picked so the correct result is arithmetically distinct from any byte-read-of-high-byte, byte-read-of-low-byte, or rotate interpretation.
 
 #### 5.4.3 `STRH` with `address[0] == 1`
 
-The halfword is written unrotated to `address & ~1`. The hardware masks the low bit and writes anyway. Games that do this are buggy, but the CPU does not raise an exception.
+**Decision (implemented):** mask bit 0 and write the aligned halfword. No rotate, no exception.
 
 ```
 bus.write16(address & ~1u, rd_value & 0xFFFFu)
 ```
+
+Both the ARM7TDMI TRM and melonDS (`ARMv4::DataWrite16` in `src/ARM.cpp`) define STRH this way — there was no quirk to weigh against. Games that issue an unaligned store are buggy; the CPU silently drops the low bit.
+
+Pinned in the test suite: `test_strh_unaligned_odd_address_imm_masks_low_bit` and `test_strh_unaligned_odd_address_reg_masks_low_bit`. Both use a clean-slate + spillover pattern (pre-zero the target halfword AND the adjacent halfword, STRH, then assert the target got the low 16 bits and the neighbor stayed zero) so a buggy 32-bit-write promotion would be caught.
 
 #### 5.4.4 `LDRSB` has no alignment concern
 
@@ -395,7 +408,7 @@ Rationale: if writeback runs first and then `state.r[rd] = value` overwrites it 
 Documented as UNPREDICTABLE on ARMv4T. We:
 
 1. Log a warn (`DS_LOG_WARN` with PC and instruction).
-2. Write the loaded value to R15 with `value & ~1u` (mask the low bit, matching ARMv4's PC alignment behavior).
+2. Write the loaded value to R15 with `value & ~0x3u` (word-align — matches ARMv4's PC alignment behavior and the existing `write_rd` helper in `arm7_decode_internal.hpp`, which does the same for all load-to-PC paths).
 3. **Do not** set `CPSR.T` (ARMv4 leaves Thumb bit unchanged on PC writes — GBATEK verbatim for LDR: *"LDR PC,<op> on ARMv4 leaves CPSR.T unchanged"*).
 4. **Do not** account for pipeline flush — Q1 placeholder is still "every instruction costs 1 cycle". Defer to the cycle-accuracy slice.
 
@@ -505,7 +518,7 @@ No public API changes, no header-include graph changes outside `src/cpu/arm7/`, 
 Slice 3b3 is complete when:
 
 1. All 24 test binaries build and pass under `ctest --output-on-failure`.
-2. The encoding recognizer correctly routes every `bits[27:25]==000 && bit[4]==1 && bit[7]==1` instruction to `dispatch_halfword` without false positives on DP, multiply, or PSR-transfer encodings.
+2. The encoding recognizer correctly routes every `bit[25]==0 && bit[4]==1 && bit[7]==1` instruction to `dispatch_halfword` without false positives on immediate-form DP (bit[25]==1), reg-shift DP (bit[7]==0 or bit[4]==0), multiply, or PSR-transfer encodings.
 3. The four happy-path opcodes (`LDRH`, `STRH`, `LDRSB`, `LDRSH`) are implemented per §4.4.
 4. The three unaligned quirks (§5.4) are implemented and tested, cross-referenced against melonDS.
 5. The `Rn==Rd` writeback rule (§5.5) is implemented on all three load variants and tested on each.
@@ -521,6 +534,10 @@ Slice 3b3 is complete when:
 ```
 Is this instruction a halfword/signed data transfer?
   (instr & 0x0E000090) == 0x00000090       // bits[27:25]==000, bit[7]=1, bit[4]=1
+  (NB: the 0x0E mask sets bit 25 to 0, enforcing the I-bit gate —
+   dispatch_arm routes both 000 and 001 to dispatch_dp, and the 001
+   case is immediate-form DP where bit[4]/bit[7] are immediate bits,
+   not the halfword shape field.)
   AND the prior multiply check did not match
   AND the prior PSR check did not match
 
