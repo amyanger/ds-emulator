@@ -101,12 +101,41 @@ static void ldr_word_u0_subtracts_offset() {
     REQUIRE(nds.cpu7().state().r[1] == kData + 0x10u);  // no writeback
 }
 
+static void ldr_pre_index_writeback_updates_rn() {
+    NDS nds;
+    nds.cpu7().state().r[1] = kData;
+    nds.arm7_bus().write32(kData + 4, 0xAAAA'5555u);
+
+    // LDR R0, [R1, #4]!        (pre-index, writeback)
+    // cond=AL, 01, I=0, P=1, U=1, B=0, W=1, L=1, Rn=1, Rd=0, imm12=4
+    // -> 1110 0101 1011 0001 0000 0000 0000 0100 = 0xE5B1'0004
+    run_one(nds, 0xE5B1'0004u);
+
+    REQUIRE(nds.cpu7().state().r[0] == 0xAAAA'5555u);
+    REQUIRE(nds.cpu7().state().r[1] == kData + 4u);  // writeback applied
+}
+
+static void ldr_pre_index_no_writeback_keeps_rn() {
+    NDS nds;
+    nds.cpu7().state().r[1] = kData;
+    nds.arm7_bus().write32(kData + 4, 0x0000'FFFFu);
+
+    // LDR R0, [R1, #4]         (pre-index, no writeback, W=0)
+    // Already covered by Task 5's ldr_word_imm_offset_loads_value, but
+    // add an explicit "Rn unchanged" assertion for readability of the
+    // writeback matrix.
+    run_one(nds, 0xE591'0004u);
+    REQUIRE(nds.cpu7().state().r[1] == kData);
+}
+
 int main() {
     ldr_word_imm_offset_loads_value();
     str_word_imm_offset_stores_value();
     ldrb_loads_byte_zero_extended();
     strb_stores_only_target_byte();
     ldr_word_u0_subtracts_offset();
+    ldr_pre_index_writeback_updates_rn();
+    ldr_pre_index_no_writeback_keeps_rn();
     std::puts("arm7_load_store_test OK");
     return 0;
 }
