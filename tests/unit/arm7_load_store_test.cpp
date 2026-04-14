@@ -143,6 +143,36 @@ static void ldr_post_index_uses_base_then_updates_rn() {
     REQUIRE(nds.cpu7().state().r[1] == kData + 4u);    // Rn updated after
 }
 
+static void ldr_register_offset_lsl2_index_times_four() {
+    NDS nds;
+    nds.cpu7().state().r[1] = kData;         // base
+    nds.cpu7().state().r[2] = 3u;            // index
+    nds.arm7_bus().write32(kData + 12, 0xABCD'0123u);  // element [3]
+
+    // LDR R0, [R1, R2, LSL #2]
+    // cond=AL, 01, I=1, P=1, U=1, B=0, W=0, L=1, Rn=1, Rd=0,
+    // shift_amt=2, shift_type=LSL(0), Rm=2
+    //   imm-shift encoding: [11:7]=shift_amt, [6:5]=shift_type, [4]=0, [3:0]=Rm
+    // -> 1110 0111 1001 0001 0000 0001 0000 0010 = 0xE791'0102
+    run_one(nds, 0xE791'0102u);
+
+    REQUIRE(nds.cpu7().state().r[0] == 0xABCD'0123u);
+}
+
+static void ldr_register_offset_lsl0_identity() {
+    NDS nds;
+    nds.cpu7().state().r[1] = kData;
+    nds.cpu7().state().r[2] = 8u;
+    nds.arm7_bus().write32(kData + 8, 0x5566'7788u);
+
+    // LDR R0, [R1, R2]          (LSL #0, i.e. identity shift)
+    // shift_amt=0, shift_type=LSL(0), bit[4]=0, Rm=2
+    // -> 1110 0111 1001 0001 0000 0000 0000 0010 = 0xE791'0002
+    run_one(nds, 0xE791'0002u);
+
+    REQUIRE(nds.cpu7().state().r[0] == 0x5566'7788u);
+}
+
 int main() {
     ldr_word_imm_offset_loads_value();
     str_word_imm_offset_stores_value();
@@ -152,6 +182,8 @@ int main() {
     ldr_pre_index_writeback_updates_rn();
     ldr_pre_index_no_writeback_keeps_rn();
     ldr_post_index_uses_base_then_updates_rn();
+    ldr_register_offset_lsl2_index_times_four();
+    ldr_register_offset_lsl0_identity();
     std::puts("arm7_load_store_test OK");
     return 0;
 }
