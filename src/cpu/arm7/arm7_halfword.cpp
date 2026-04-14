@@ -114,10 +114,10 @@ HalfwordAddress compute_halfword_address(const Arm7State& state, u32 instr) {
 }
 
 u32 load_halfword_unsigned(Arm7Bus& bus, u32 address) {
-    // Aligned path only — Task 9 adds the address[0]==1 rotate-by-8 quirk.
-    // We defensively mask the low bit so an odd address still returns a
-    // well-defined value; Task 9 will supersede this line with the real
-    // rotate behavior cross-referenced against melonDS.
+    // Unaligned address: mask bit 0, read the aligned halfword, zero-extend.
+    // The ARM7TDMI TRM documents a rotate-by-8 quirk on odd addresses, but
+    // melonDS does not model it (see ARMv4::DataRead16 in src/ARM.cpp), so
+    // we match the reference emulator rather than the TRM.
     return static_cast<u32>(bus.read16(address & ~1u));
 }
 

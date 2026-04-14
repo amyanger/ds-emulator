@@ -2,8 +2,10 @@
 // tests. Task 4 covers the LDRH happy path (aligned addresses, both
 // offset forms, every P/U/W combination, zero-extension). Task 5 adds
 // STRH coverage: same addressing matrix, the low-16 truncation rule,
-// and the Rd==R15 pipeline quirk (reads as PC+12). The unaligned
-// rotate-by-8 / address-mask quirks are deferred to Tasks 9 and 11.
+// and the Rd==R15 pipeline quirk (reads as PC+12). Unaligned LDRH
+// behavior is pinned (matches melonDS — mask bit 0, read aligned,
+// zero-extend). STRH / LDRSH unaligned cases are deferred to follow-up
+// commits.
 
 #include "bus/arm7_bus.hpp"
 #include "cpu/arm7/arm7.hpp"
@@ -208,6 +210,41 @@ static void test_ldrh_imm_offset_zero() {
 
     REQUIRE(nds.cpu7().state().r[0] == 0x0000'00FFu);
     REQUIRE(nds.cpu7().state().r[1] == 0x0380'0220u);
+}
+
+// ---- Unaligned LDRH (pinned: matches melonDS, no rotate) ------------------
+
+// LDRH R0, [R1, #5]  — odd effective address 0x0380'0105. The ARM7TDMI
+// rotate-by-8 quirk is NOT modeled (matches melonDS ARMv4::DataRead16):
+// bit 0 is masked and we read the aligned halfword at 0x0380'0104.
+static void test_ldrh_unaligned_odd_address_imm_masks_low_bit() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x0380'0100u;
+    nds.arm7_bus().write16(0x0380'0104u, 0xBEEFu);
+
+    run_one(nds, kBase,
+            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
+                                /*Rn*/1, /*Rd*/0, kSHhalf, /*off*/5));
+
+    REQUIRE(nds.cpu7().state().r[0] == 0x0000'BEEFu);
+    REQUIRE(nds.cpu7().state().r[1] == 0x0380'0100u);  // unchanged
+}
+
+// LDRH R0, [R1, R2]  — odd effective address via register offset. Same
+// rule: no rotate, mask bit 0, aligned halfword read (matches melonDS).
+static void test_ldrh_unaligned_odd_address_reg_masks_low_bit() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x0380'0200u;
+    nds.cpu7().state().r[2] = 0x0000'0001u;
+    nds.arm7_bus().write16(0x0380'0200u, 0xCAFEu);
+
+    run_one(nds, kBase,
+            encode_halfword_reg(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
+                                /*Rn*/1, /*Rd*/0, kSHhalf, /*Rm*/2));
+
+    REQUIRE(nds.cpu7().state().r[0] == 0x0000'CAFEu);
+    REQUIRE(nds.cpu7().state().r[1] == 0x0380'0200u);  // unchanged
+    REQUIRE(nds.cpu7().state().r[2] == 0x0000'0001u);  // unchanged
 }
 
 // ---- STRH aligned cases ---------------------------------------------------
@@ -592,6 +629,8 @@ int main() {
     test_ldrh_zero_extension();
     test_ldrh_imm_offset_0xFE();
     test_ldrh_imm_offset_zero();
+    test_ldrh_unaligned_odd_address_imm_masks_low_bit();
+    test_ldrh_unaligned_odd_address_reg_masks_low_bit();
 
     test_strh_imm_preindex_up_no_writeback();
     test_strh_imm_preindex_up_writeback();
