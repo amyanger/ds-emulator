@@ -234,5 +234,3 @@ Direct boot is implemented from publicly documented hardware behavior. Users sup
 Built standing on the shoulders of giants: the GBATEK authors who reverse-engineered the DS hardware, the melonDS and DeSmuME teams for showing what's possible, and the gbadev / nds-dev homebrew communities for keeping the knowledge alive.
 
 ---
-
-> 💡 *"You don't really understand a machine until you've tried to emulate it."*
