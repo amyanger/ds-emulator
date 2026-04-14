@@ -18,6 +18,11 @@ cmake_install.cmake
 compile_commands.json
 .clangd/
 
+# Editor swap / backup files
+*.swp
+*.swo
+*~
+
 # macOS
 .DS_Store
 
