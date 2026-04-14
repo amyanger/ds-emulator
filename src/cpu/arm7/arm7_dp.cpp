@@ -41,23 +41,25 @@ u32 dispatch_dp(Arm7State& state, u32 instr, u32 instr_addr) {
     // immediate-shift (bit4=0) from register-shift (bit4=1) operand2.
     const bool i_bit = ((instr >> 25) & 1u) != 0;
     const bool reg_shift = !i_bit && ((instr >> 4) & 1u) != 0;
-    if (reg_shift) {
-        // Register-shifted-register operand2 — deferred to slice 3b2.
-        // Also catches MUL/MLA and halfword LDR/STR, which all live in
-        // this encoding space and are unimplemented in slice 3b1.
-        DS_LOG_WARN("arm7: register-shift dp form 0x%08X at 0x%08X",
-                    instr, instr_addr);
-        return 1;
-    }
 
-    // Compute operand2 first so we can early-out on the unimplemented
-    // immediate-shift form before paying for a register-file lookup.
     ShifterResult op2;
     if (i_bit) {
         const u32 imm8   = instr & 0xFFu;
         const u32 rotate = (instr >> 8) & 0xFu;
         const bool c_in  = (state.cpsr & (1u << 29)) != 0;
         op2 = rotated_imm(imm8, rotate, c_in);
+    } else if (reg_shift) {
+        const u32  rm         = instr & 0xFu;
+        const u32  rs         = (instr >> 8) & 0xFu;
+        const u32  shift_type = (instr >> 5) & 0x3u;
+        const u32  amount     = read_rs_for_reg_shift(state, rs) & 0xFFu;
+        const u32  rm_value   = read_rm_pc12(state, rm);
+        // barrel_shift_reg returns meaningless carry when amount == 0; the caller
+        // is responsible for preserving CPSR.C in that case.
+        op2 = barrel_shift_reg(rm_value, static_cast<ShiftType>(shift_type), amount);
+        if (amount == 0) {
+            op2.carry = (state.cpsr & (1u << 29)) != 0;
+        }
     } else {
         // Immediate-shifted register operand2. Rm==15 naturally reads
         // state.r[15] == instr_addr + 8.
@@ -77,7 +79,9 @@ u32 dispatch_dp(Arm7State& state, u32 instr, u32 instr_addr) {
     const u32  rn     = (instr >> 16) & 0xFu;
     const u32  rd     = (instr >> 12) & 0xFu;
 
-    const u32 rn_val = state.r[rn];
+    // In reg-shift form, Rn == 15 also reads PC + 12 (same pipeline-stage
+    // offset as Rm). In imm-shift and imm-form it reads PC + 8 as usual.
+    const u32 rn_val = reg_shift ? read_rm_pc12(state, rn) : state.r[rn];
 
     u32  result       = 0;
     bool logical_form = true;

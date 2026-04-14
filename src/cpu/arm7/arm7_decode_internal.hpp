@@ -23,6 +23,24 @@ inline void write_rd(Arm7State& s, u32 rd, u32 value) {
     }
 }
 
+// Read Rm in register-shift DP form. In reg-shift form, the ARM reads Rm
+// one pipeline stage later than in imm-shift form, so Rm == 15 returns
+// PC + 12 instead of PC + 8. Also used for Rn reads in reg-shift form.
+inline u32 read_rm_pc12(const Arm7State& s, u32 rm) {
+    return (rm == 15) ? (s.r[15] + 4) : s.r[rm];
+}
+
+// Read Rs (the register holding the shift amount) in register-shift DP
+// form. Rs == 15 is UNPREDICTABLE on real ARMv4T hardware; we log a warn
+// and return PC + 12 for determinism. Games do not use this form.
+inline u32 read_rs_for_reg_shift(const Arm7State& s, u32 rs) {
+    if (rs == 15) {
+        DS_LOG_WARN("arm7: reg-shift DP with Rs == 15 (unpredictable) at PC 0x%08X",
+                    s.pc);
+    }
+    return (rs == 15) ? (s.r[15] + 4) : s.r[rs];
+}
+
 // Family dispatch helpers. Each returns the number of ARM7 cycles the
 // instruction consumed. In slice 3b1 every path returns 1.
 u32 dispatch_dp(Arm7State& state, u32 instr, u32 instr_addr);
