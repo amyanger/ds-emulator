@@ -21,7 +21,7 @@ enum class DpOp : u8 {
 
 }  // namespace
 
-u32 dispatch_dp(Arm7State& state, u32 instr, u32 instr_addr) {
+u32 dispatch_dp(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
     // BX lives in DP encoding space: cond 0001 0010 1111 1111 1111 0001 Rm.
     // Mask: 0x0FFFFFF0, match: 0x012FFF10 (with the condition field masked).
     if ((instr & 0x0FFF'FFF0u) == 0x012F'FF10u) {
@@ -68,6 +68,24 @@ u32 dispatch_dp(Arm7State& state, u32 instr, u32 instr_addr) {
     // bits[7:4] ∈ {1011,1101,1111} naturally don't collide with 1001.
     if ((instr & 0x0F0000F0u) == 0x00000090u) {
         return dispatch_multiply(state, instr, instr_addr);
+    }
+
+    // Halfword / signed data transfer extension space.
+    // dispatch_arm routes both bits[27:25]==000 and ==001 here, so the
+    // recognizer must gate on bit[25]==0 (I-bit). In the 001 case bit[7]
+    // and bit[4] are part of an 8-bit immediate, not the halfword shape
+    // field, so we must not match there.
+    //
+    // The halfword pattern is bit[25]==0 && bit[4]==1 && bit[7]==1 with
+    // SH != 00, plus the SWP slot (SH=00, warn path inside
+    // dispatch_halfword). The prior multiply recognizer has already
+    // peeled off its exact pattern (bits[27:22]==0 AND bits[7:4]==1001),
+    // so any remaining bit4+bit7 combination here belongs to the
+    // halfword extension space.
+    if ((instr & (1u << 25)) == 0
+        && (instr & (1u << 4)) != 0
+        && (instr & (1u << 7)) != 0) {
+        return dispatch_halfword(state, bus, instr, instr_addr);
     }
 
     // Bit 4 of the instruction, when bit 25 (I) is 0, distinguishes

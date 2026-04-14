@@ -28,7 +28,7 @@ u32 dispatch_arm(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
     switch (bits_27_25) {
         case 0b000:
         case 0b001:
-            return dispatch_dp(state, instr, instr_addr);
+            return dispatch_dp(state, bus, instr, instr_addr);
         case 0b010:
         case 0b011:
             return dispatch_single_data_transfer(state, bus, instr, instr_addr);

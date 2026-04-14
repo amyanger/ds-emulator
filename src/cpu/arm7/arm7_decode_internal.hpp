@@ -43,7 +43,7 @@ inline u32 read_rs_for_reg_shift(const Arm7State& s, u32 rs) {
 
 // Family dispatch helpers. Each returns the number of ARM7 cycles the
 // instruction consumed. In slice 3b1 every path returns 1.
-u32 dispatch_dp(Arm7State& state, u32 instr, u32 instr_addr);
+u32 dispatch_dp(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr);
 u32 dispatch_branch(Arm7State& state, u32 instr);
 u32 dispatch_single_data_transfer(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr);
 
@@ -60,5 +60,12 @@ u32 dispatch_multiply(Arm7State& state, u32 instr, u32 instr_addr);
 // caller has already confirmed the pattern matches one of the three
 // PSR-transfer encoding shapes (MRS, MSR reg form, MSR imm form).
 u32 dispatch_psr_transfer(Arm7State& state, u32 instr, u32 instr_addr);
+
+// Halfword / signed data transfer dispatch entry point.
+// Called from dispatch_dp after the halfword recognizer matches.
+// Handles LDRH, STRH, LDRSB, LDRSH. Warns on LDRD/STRD/SWP slots and
+// on malformed encodings per GBATEK §"ARM Memory: Halfword, Doubleword,
+// and Signed Data Transfer".
+u32 dispatch_halfword(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr);
 
 }  // namespace ds
