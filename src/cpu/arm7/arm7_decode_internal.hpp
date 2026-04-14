@@ -55,4 +55,10 @@ u32 dispatch_single_data_transfer(Arm7State& state, Arm7Bus& bus, u32 instr, u32
 // filled in by Task 6 / Task 7.
 u32 dispatch_multiply(Arm7State& state, u32 instr, u32 instr_addr);
 
+// PSR transfer (MRS / MSR) dispatcher. Called from the top of dispatch_dp
+// before the multiply recognizer. Handles both CPSR and SPSR forms; the
+// caller has already confirmed the pattern matches one of the three
+// PSR-transfer encoding shapes (MRS, MSR reg form, MSR imm form).
+u32 dispatch_psr_transfer(Arm7State& state, u32 instr, u32 instr_addr);
+
 }  // namespace ds

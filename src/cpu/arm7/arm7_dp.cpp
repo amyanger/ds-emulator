@@ -37,6 +37,29 @@ u32 dispatch_dp(Arm7State& state, u32 instr, u32 instr_addr) {
         return 1;
     }
 
+    // PSR transfer: three encoding variants, all with bits[27:26]==00,
+    // bits[24:23]==10, bit[20]==0. Bit 22 (P) picks CPSR vs SPSR.
+    // Bit 21 = 0 → MRS; bit 21 = 1 → MSR. Bit 25 picks register vs
+    // immediate form for MSR.
+    //
+    //   MRS:          xxxx 00010 P 00 1111 Rd   000000000000
+    //   MSR reg form: xxxx 00010 P 10 mask 1111 00000000 Rm
+    //   MSR imm form: xxxx 00110 P 10 mask 1111 rot imm8
+    //
+    // Masks: 0x0FB00000 matches bits[27:20] with bit 22 left free for P.
+    //   MRS          → 0x01000000
+    //   MSR reg      → 0x01200000
+    //   MSR imm      → 0x03200000
+    if ((instr & 0x0FB00000u) == 0x01000000u) {
+        return dispatch_psr_transfer(state, instr, instr_addr);  // MRS
+    }
+    if ((instr & 0x0FB00000u) == 0x01200000u) {
+        return dispatch_psr_transfer(state, instr, instr_addr);  // MSR reg form
+    }
+    if ((instr & 0x0FB00000u) == 0x03200000u) {
+        return dispatch_psr_transfer(state, instr, instr_addr);  // MSR imm form
+    }
+
     // Multiply family: bits[27:24] == 0000, bits[7:4] == 1001. Bit 23
     // distinguishes short (MUL/MLA) vs long (UMULL/UMLAL/SMULL/SMLAL);
     // bit 22 is signed/unsigned for the long form. Peeled off before

@@ -90,6 +90,27 @@ struct Arm7State {
         cpsr = (cpsr & ~0x1Fu) | static_cast<u32>(to_mode);
     }
 
+    // Returns a pointer to the SPSR storage slot for the current mode.
+    // Returns nullptr when the current mode is User or System (neither
+    // of those modes has a dedicated SPSR — they share the user bank
+    // and the Arm7Banks struct has no spsr_usr or spsr_sys field).
+    // Used by arm7_psr.cpp for MRS / MSR SPSR, and by future slice 3d
+    // exception-entry code.
+    u32* spsr_slot() {
+        switch (current_mode()) {
+            case Mode::Fiq:        return &banks.spsr_fiq;
+            case Mode::Irq:        return &banks.spsr_irq;
+            case Mode::Supervisor: return &banks.spsr_svc;
+            case Mode::Abort:      return &banks.spsr_abt;
+            case Mode::Undefined:  return &banks.spsr_und;
+            default:               return nullptr;  // User or System
+        }
+    }
+
+    const u32* spsr_slot() const {
+        return const_cast<Arm7State*>(this)->spsr_slot();
+    }
+
 private:
     void store_banked_registers(Mode m) {
         // All non-FIQ modes share the User bank for R8..R12, so every
