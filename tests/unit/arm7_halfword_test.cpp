@@ -71,6 +71,7 @@ static u32 encode_halfword_reg(u8 cond, u8 p, u8 u, u8 w, u8 l,
 
 constexpr u8 kCondAL = 0xE;
 constexpr u8 kSHhalf = 1;  // SH=1 -> halfword unsigned
+constexpr u8 kSHsb   = 2;  // SH=2 -> signed byte
 
 }  // namespace
 
@@ -321,6 +322,93 @@ static void test_strh_rd_eq_r15_reads_pc_plus_12() {
     REQUIRE(nds.arm7_bus().read16(0x0380'0400u) == 0x000Cu);
 }
 
+// ---- LDRSB cases ----------------------------------------------------------
+
+// LDRSB R0, [R1]  — positive byte (bit 7 clear). Must zero-extend
+// because the sign bit is zero.
+static void test_ldrsb_positive_byte() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x0380'0500u;
+    nds.arm7_bus().write8(0x0380'0500u, 0x7Fu);
+
+    run_one(nds, kBase,
+            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
+                                /*Rn*/1, /*Rd*/0, kSHsb, /*off*/0));
+
+    REQUIRE(nds.cpu7().state().r[0] == 0x0000'007Fu);
+}
+
+// LDRSB R0, [R1]  — negative byte 0x80 (bit 7 set, minimum signed i8).
+// Must sign-extend to 0xFFFF'FF80.
+static void test_ldrsb_negative_byte_sign_extended() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x0380'0501u;
+    nds.arm7_bus().write8(0x0380'0501u, 0x80u);
+
+    run_one(nds, kBase,
+            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
+                                /*Rn*/1, /*Rd*/0, kSHsb, /*off*/0));
+
+    REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'FF80u);
+}
+
+// LDRSB R0, [R1]  — 0xFF is the strongest sign-extension verification:
+// every bit of the result must be 1.
+static void test_ldrsb_negative_byte_ff() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x0380'0502u;
+    nds.arm7_bus().write8(0x0380'0502u, 0xFFu);
+
+    run_one(nds, kBase,
+            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
+                                /*Rn*/1, /*Rd*/0, kSHsb, /*off*/0));
+
+    REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'FFFFu);
+}
+
+// LDRSB R0, [R1], #4  — post-index form with a negative byte. Verifies
+// sign-extension and post-index writeback compose correctly.
+static void test_ldrsb_imm_postindex_writeback() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x0380'0300u;
+    nds.arm7_bus().write8(0x0380'0300u, 0x81u);
+
+    run_one(nds, kBase,
+            encode_halfword_imm(kCondAL, /*P*/0, /*U*/1, /*W*/0, /*L*/1,
+                                /*Rn*/1, /*Rd*/0, kSHsb, /*off*/4));
+
+    REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'FF81u);
+    REQUIRE(nds.cpu7().state().r[1] == 0x0380'0304u);
+}
+
+// LDRSB R0, [R1, R2]  — register-offset form, positive byte.
+static void test_ldrsb_reg_preindex_up() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x0380'0300u;
+    nds.cpu7().state().r[2] = 0x10u;
+    nds.arm7_bus().write8(0x0380'0310u, 0x40u);
+
+    run_one(nds, kBase,
+            encode_halfword_reg(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
+                                /*Rn*/1, /*Rd*/0, kSHsb, /*Rm*/2));
+
+    REQUIRE(nds.cpu7().state().r[0] == 0x0000'0040u);
+}
+
+// LDRSB R0, [R1]  — odd (unaligned) address. Byte loads have NO
+// alignment rule, so this must work cleanly with no mask applied.
+static void test_ldrsb_unaligned_address_is_fine() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x0380'0305u;  // odd
+    nds.arm7_bus().write8(0x0380'0305u, 0xC3u);
+
+    run_one(nds, kBase,
+            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
+                                /*Rn*/1, /*Rd*/0, kSHsb, /*off*/0));
+
+    REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'FFC3u);
+}
+
 int main() {
     test_ldrh_imm_preindex_up_no_writeback();
     test_ldrh_imm_preindex_up_writeback();
@@ -340,6 +428,13 @@ int main() {
     test_strh_only_low_16_bits_written();
     test_strh_rd_eq_r15_reads_pc_plus_12();
 
-    std::puts("arm7_halfword_test: all LDRH and STRH cases passed");
+    test_ldrsb_positive_byte();
+    test_ldrsb_negative_byte_sign_extended();
+    test_ldrsb_negative_byte_ff();
+    test_ldrsb_imm_postindex_writeback();
+    test_ldrsb_reg_preindex_up();
+    test_ldrsb_unaligned_address_is_fine();
+
+    std::puts("arm7_halfword_test: all LDRH, STRH, and LDRSB cases passed");
     return 0;
 }

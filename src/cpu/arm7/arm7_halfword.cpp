@@ -45,7 +45,7 @@ HalfwordAddress compute_halfword_address(const Arm7State& state, u32 instr);
 // anonymous-namespace declarations.
 u32               load_halfword_unsigned(Arm7Bus& bus, u32 address);       // task 4
 [[maybe_unused]] u32  load_halfword_signed(Arm7Bus& bus, u32 address);     // task 7
-[[maybe_unused]] u32  load_byte_signed(Arm7Bus& bus, u32 address);         // task 6
+u32               load_byte_signed(Arm7Bus& bus, u32 address);             // task 6
 void store_halfword(Arm7Bus& bus, u32 address, u32 value);                    // task 5
 
 // Rn==Rd-safe Rd write with optional writeback. On a load where Rn==Rd,
@@ -125,8 +125,12 @@ u32 load_halfword_signed(Arm7Bus&, u32) {
     return 0;  // TODO(task 7): real LDRSH body
 }
 
-u32 load_byte_signed(Arm7Bus&, u32) {
-    return 0;  // TODO(task 6): real LDRSB body
+u32 load_byte_signed(Arm7Bus& bus, u32 address) {
+    // Byte loads have no alignment concerns — there's only one byte at
+    // any address. Read the byte, then sign-extend bit 7 through bits
+    // 8..31 using the standard u8 -> i8 -> i32 -> u32 promotion chain.
+    const u8 raw = bus.read8(address);
+    return static_cast<u32>(static_cast<i32>(static_cast<i8>(raw)));
 }
 
 void store_halfword(Arm7Bus& bus, u32 address, u32 value) {
@@ -203,9 +207,13 @@ u32 dispatch_halfword(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr)
                 write_rd_and_writeback(state, rd, value, addr);
                 break;
             }
-            case 2:
-                DS_LOG_WARN("arm7: LDRSB not yet implemented at 0x%08X", state.pc);
+            case 2: {
+                const HalfwordAddress addr = compute_halfword_address(state, instr);
+                const u32 rd    = (instr >> 12) & 0xFu;
+                const u32 value = load_byte_signed(bus, addr.address);
+                write_rd_and_writeback(state, rd, value, addr);
                 break;
+            }
             case 3:
                 DS_LOG_WARN("arm7: LDRSH not yet implemented at 0x%08X", state.pc);
                 break;
