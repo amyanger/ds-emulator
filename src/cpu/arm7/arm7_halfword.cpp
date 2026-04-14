@@ -122,10 +122,11 @@ u32 load_halfword_unsigned(Arm7Bus& bus, u32 address) {
 }
 
 u32 load_halfword_signed(Arm7Bus& bus, u32 address) {
-    // Aligned path only — Task 10 adds the address[0]==1 quirk, which
-    // on ARM7TDMI degenerates to an LDRSB of the single odd byte.
-    // We defensively mask the low bit so an odd address still returns
-    // a well-defined value until Task 10 replaces this.
+    // Unaligned address: mask bit 0, read the aligned halfword, sign-extend
+    // to 32. The ARM7TDMI TRM documents an odd-address quirk where LDRSH
+    // degenerates to an LDRSB of the single odd byte, but melonDS does not
+    // model it (see ARMv4::DataRead16 in src/ARM.cpp and A_LDRSH in
+    // src/ARMInterpreter_LoadStore.cpp), so we match the reference emulator.
     const u16 raw = bus.read16(address & ~1u);
     return static_cast<u32>(static_cast<i32>(static_cast<i16>(raw)));
 }

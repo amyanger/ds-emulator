@@ -2,10 +2,10 @@
 // tests. Task 4 covers the LDRH happy path (aligned addresses, both
 // offset forms, every P/U/W combination, zero-extension). Task 5 adds
 // STRH coverage: same addressing matrix, the low-16 truncation rule,
-// and the Rd==R15 pipeline quirk (reads as PC+12). Unaligned LDRH
-// behavior is pinned (matches melonDS — mask bit 0, read aligned,
-// zero-extend). STRH / LDRSH unaligned cases are deferred to follow-up
-// commits.
+// and the Rd==R15 pipeline quirk (reads as PC+12). Unaligned LDRH and
+// LDRSH behavior is pinned (matches melonDS — mask bit 0, read aligned
+// halfword, zero- or sign-extend; no rotate, no byte-read quirk). STRH
+// unaligned cases are deferred to a follow-up commit.
 
 #include "bus/arm7_bus.hpp"
 #include "cpu/arm7/arm7.hpp"
@@ -550,6 +550,48 @@ static void test_ldrsh_positive_halfword_7fff() {
     REQUIRE(nds.cpu7().state().r[0] == 0x0000'7FFFu);
 }
 
+// ---- Unaligned LDRSH (pinned: matches melonDS, no byte-read quirk) --------
+
+// LDRSH R0, [R1, #5]  — odd effective address 0x0380'0105. The ARM7TDMI
+// TRM documents an odd-address quirk where LDRSH degenerates to an LDRSB
+// of the single odd byte, but melonDS does NOT model it (see A_LDRSH in
+// src/ARMInterpreter_LoadStore.cpp): bit 0 is masked and we read the
+// aligned halfword at 0x0380'0104, then sign-extend. The sentinel 0x80F0
+// is chosen so the correct result (0xFFFF'80F0) differs from both byte
+// reads (0xFFFF'FF80 high byte / 0xFFFF'FFF0 low byte) and any rotated
+// form, so a regression toward the TRM quirk would be caught here.
+static void test_ldrsh_unaligned_odd_address_imm_masks_low_bit() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x0380'0100u;
+    nds.arm7_bus().write16(0x0380'0104u, 0x80F0u);
+
+    run_one(nds, kBase,
+            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
+                                /*Rn*/1, /*Rd*/0, kSHsh, /*off*/5));
+
+    REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'80F0u);
+    REQUIRE(nds.cpu7().state().r[1] == 0x0380'0100u);  // unchanged
+}
+
+// LDRSH R0, [R1, R2]  — odd effective address via register offset. Same
+// rule: mask bit 0, aligned halfword read, sign-extend (matches melonDS,
+// no byte-read quirk). Sentinel 0x8001 — correct result 0xFFFF'8001 is
+// distinct from any byte-read or rotated interpretation.
+static void test_ldrsh_unaligned_odd_address_reg_masks_low_bit() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x0380'0200u;
+    nds.cpu7().state().r[2] = 0x0000'0001u;
+    nds.arm7_bus().write16(0x0380'0200u, 0x8001u);
+
+    run_one(nds, kBase,
+            encode_halfword_reg(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
+                                /*Rn*/1, /*Rd*/0, kSHsh, /*Rm*/2));
+
+    REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'8001u);
+    REQUIRE(nds.cpu7().state().r[1] == 0x0380'0200u);  // unchanged
+    REQUIRE(nds.cpu7().state().r[2] == 0x0000'0001u);  // unchanged
+}
+
 // ---- Rn == Rd writeback suppression (loads) -------------------------------
 //
 // ARMv4T rule: when a load with writeback targets the same register as its
@@ -654,6 +696,8 @@ int main() {
     test_ldrsh_imm_postindex_down();
     test_ldrsh_reg_preindex_up();
     test_ldrsh_positive_halfword_7fff();
+    test_ldrsh_unaligned_odd_address_imm_masks_low_bit();
+    test_ldrsh_unaligned_odd_address_reg_masks_low_bit();
 
     test_ldrh_rn_eq_rd_writeback_suppressed();
     test_ldrsb_rn_eq_rd_writeback_suppressed();
