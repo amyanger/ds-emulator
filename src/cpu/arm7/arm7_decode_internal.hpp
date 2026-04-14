@@ -47,4 +47,12 @@ u32 dispatch_dp(Arm7State& state, u32 instr, u32 instr_addr);
 u32 dispatch_branch(Arm7State& state, u32 instr);
 u32 dispatch_single_data_transfer(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr);
 
+// Multiply family dispatcher. Called from the top of dispatch_dp before
+// any DP operand decoding. The first thing it does is pattern-check
+// (instr & 0x0F0000F0) == 0x00000090; if that fails the caller should
+// treat the instruction as normal DP. In slice 3b2 Task 5, the long-form
+// variants (UMULL/UMLAL/SMULL/SMLAL) are stubbed with a warn — they are
+// filled in by Task 6 / Task 7.
+u32 dispatch_multiply(Arm7State& state, u32 instr, u32 instr_addr);
+
 }  // namespace ds

@@ -37,6 +37,13 @@ u32 dispatch_dp(Arm7State& state, u32 instr, u32 instr_addr) {
         return 1;
     }
 
+    // Multiply family: bits[27:22] ∈ {000000, 000001}, bits[7:4] == 1001.
+    // Peeled off before any DP operand decoding so the reg-shift form
+    // (bit4==1 with bit7==0) doesn't false-match.
+    if ((instr & 0x0FC000F0u) == 0x00000090u) {
+        return dispatch_multiply(state, instr, instr_addr);
+    }
+
     // Bit 4 of the instruction, when bit 25 (I) is 0, distinguishes
     // immediate-shift (bit4=0) from register-shift (bit4=1) operand2.
     const bool i_bit = ((instr >> 25) & 1u) != 0;

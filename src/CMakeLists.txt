@@ -11,6 +11,7 @@ add_library(ds_core STATIC
     cpu/arm7/arm7_dp.cpp
     cpu/arm7/arm7_branch.cpp
     cpu/arm7/arm7_loadstore.cpp
+    cpu/arm7/arm7_multiply.cpp
 )
 target_include_directories(ds_core
     PUBLIC  ${CMAKE_SOURCE_DIR}/include
