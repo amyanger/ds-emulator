@@ -1,8 +1,9 @@
 // arm7_halfword_test.cpp — ARMv4T halfword and signed-byte transfer
-// tests. Task 4 covers the LDRH happy path only: aligned addresses,
-// both immediate- and register-offset forms, every P/U/W combination,
-// and a dedicated zero-extension verification. The unaligned LDRH
-// rotate-by-8 quirk is deferred to Task 9 of slice 3b3.
+// tests. Task 4 covers the LDRH happy path (aligned addresses, both
+// offset forms, every P/U/W combination, zero-extension). Task 5 adds
+// STRH coverage: same addressing matrix, the low-16 truncation rule,
+// and the Rd==R15 pipeline quirk (reads as PC+12). The unaligned
+// rotate-by-8 / address-mask quirks are deferred to Tasks 9 and 11.
 
 #include "bus/arm7_bus.hpp"
 #include "cpu/arm7/arm7.hpp"
@@ -207,6 +208,119 @@ static void test_ldrh_imm_offset_zero() {
     REQUIRE(nds.cpu7().state().r[1] == 0x0380'0220u);
 }
 
+// ---- STRH aligned cases ---------------------------------------------------
+
+// STRH R0, [R1, #4]  — pre-index, up, no writeback.
+static void test_strh_imm_preindex_up_no_writeback() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x0380'0200u;
+    nds.cpu7().state().r[0] = 0x0000'ABCDu;
+
+    run_one(nds, kBase,
+            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/0,
+                                /*Rn*/1, /*Rd*/0, kSHhalf, /*off*/4));
+
+    REQUIRE(nds.arm7_bus().read16(0x0380'0204u) == 0xABCDu);
+    REQUIRE(nds.cpu7().state().r[1] == 0x0380'0200u);  // unchanged
+}
+
+// STRH R0, [R1, #4]!  — pre-index, up, writeback.
+static void test_strh_imm_preindex_up_writeback() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x0380'0200u;
+    nds.cpu7().state().r[0] = 0x0000'ABCDu;
+
+    run_one(nds, kBase,
+            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/1, /*L*/0,
+                                /*Rn*/1, /*Rd*/0, kSHhalf, /*off*/4));
+
+    REQUIRE(nds.arm7_bus().read16(0x0380'0204u) == 0xABCDu);
+    REQUIRE(nds.cpu7().state().r[1] == 0x0380'0204u);
+}
+
+// STRH R0, [R1, #-2]!  — pre-index, down, writeback.
+static void test_strh_imm_preindex_down_writeback() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x0380'0206u;
+    nds.cpu7().state().r[0] = 0x0000'1234u;
+
+    run_one(nds, kBase,
+            encode_halfword_imm(kCondAL, /*P*/1, /*U*/0, /*W*/1, /*L*/0,
+                                /*Rn*/1, /*Rd*/0, kSHhalf, /*off*/2));
+
+    REQUIRE(nds.arm7_bus().read16(0x0380'0204u) == 0x1234u);
+    REQUIRE(nds.cpu7().state().r[1] == 0x0380'0204u);
+}
+
+// STRH R0, [R1], #2  — post-index, up. Access happens at the original
+// Rn, then Rn is advanced by the offset.
+static void test_strh_imm_postindex_up() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x0380'0208u;
+    nds.cpu7().state().r[0] = 0x0000'CAFEu;
+
+    run_one(nds, kBase,
+            encode_halfword_imm(kCondAL, /*P*/0, /*U*/1, /*W*/0, /*L*/0,
+                                /*Rn*/1, /*Rd*/0, kSHhalf, /*off*/2));
+
+    REQUIRE(nds.arm7_bus().read16(0x0380'0208u) == 0xCAFEu);
+    REQUIRE(nds.cpu7().state().r[1] == 0x0380'020Au);
+}
+
+// STRH R0, [R1, R2]  — register offset, pre-index, up, no writeback.
+static void test_strh_reg_preindex_up_no_writeback() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x0380'0200u;
+    nds.cpu7().state().r[2] = 0x10u;
+    nds.cpu7().state().r[0] = 0x0000'5678u;
+
+    run_one(nds, kBase,
+            encode_halfword_reg(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/0,
+                                /*Rn*/1, /*Rd*/0, kSHhalf, /*Rm*/2));
+
+    REQUIRE(nds.arm7_bus().read16(0x0380'0210u) == 0x5678u);
+    REQUIRE(nds.cpu7().state().r[1] == 0x0380'0200u);
+    REQUIRE(nds.cpu7().state().r[2] == 0x10u);
+}
+
+// STRH must write only the low 16 bits of Rd and must not touch the
+// adjacent halfword. Pre-seed the containing word so the upper half has
+// a known sentinel; after STRH, the lower half should be BEEF (low 16
+// of 0xDEAD_BEEF) and the upper half should still be FACE.
+static void test_strh_only_low_16_bits_written() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x0380'0300u;
+    nds.cpu7().state().r[0] = 0xDEAD'BEEFu;
+    // Little-endian: word 0xFACE0000 puts 0x0000 at +0, 0xFACE at +2.
+    nds.arm7_bus().write32(0x0380'0300u, 0xFACE'0000u);
+
+    run_one(nds, kBase,
+            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/0,
+                                /*Rn*/1, /*Rd*/0, kSHhalf, /*off*/0));
+
+    REQUIRE(nds.arm7_bus().read16(0x0380'0300u) == 0xBEEFu);   // low 16 only
+    REQUIRE(nds.arm7_bus().read16(0x0380'0302u) == 0xFACEu);   // untouched
+    // Little-endian word read: low half first, high half second.
+    REQUIRE(nds.arm7_bus().read32(0x0380'0300u) == 0xFACE'BEEFu);
+}
+
+// STRH PC, [R0]  — Rd==R15 reads as PC+12 (= instr_addr + 12), matching
+// the word-STR pipeline convention. The stored halfword is the low 16
+// bits of that value. With instr_addr = kBase = 0x03800000, the expected
+// stored halfword is (0x03800000 + 12) & 0xFFFF = 0x000C.
+static void test_strh_rd_eq_r15_reads_pc_plus_12() {
+    NDS nds;
+    nds.cpu7().state().r[0] = 0x0380'0400u;
+    nds.arm7_bus().write16(0x0380'0400u, 0xAAAAu);  // sentinel
+
+    run_one(nds, kBase,
+            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/0,
+                                /*Rn*/0, /*Rd*/15, kSHhalf, /*off*/0));
+
+    // (kBase + 12) & 0xFFFF == 0x000C
+    REQUIRE(nds.arm7_bus().read16(0x0380'0400u) == 0x000Cu);
+}
+
 int main() {
     test_ldrh_imm_preindex_up_no_writeback();
     test_ldrh_imm_preindex_up_writeback();
@@ -218,6 +332,14 @@ int main() {
     test_ldrh_imm_offset_0xFE();
     test_ldrh_imm_offset_zero();
 
-    std::puts("arm7_halfword_test: all LDRH cases passed");
+    test_strh_imm_preindex_up_no_writeback();
+    test_strh_imm_preindex_up_writeback();
+    test_strh_imm_preindex_down_writeback();
+    test_strh_imm_postindex_up();
+    test_strh_reg_preindex_up_no_writeback();
+    test_strh_only_low_16_bits_written();
+    test_strh_rd_eq_r15_reads_pc_plus_12();
+
+    std::puts("arm7_halfword_test: all LDRH and STRH cases passed");
     return 0;
 }

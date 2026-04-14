@@ -46,17 +46,23 @@ u32 dispatch_dp(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
     //   MSR reg form: xxxx 00010 P 10 mask 1111 00000000 Rm
     //   MSR imm form: xxxx 00110 P 10 mask 1111 rot imm8
     //
-    // Masks: 0x0FB00000 matches bits[27:20] with bit 22 left free for P.
-    //   MRS          → 0x01000000
-    //   MSR reg      → 0x01200000
-    //   MSR imm      → 0x03200000
-    if ((instr & 0x0FB00000u) == 0x01000000u) {
+    // The MRS and MSR-reg recognizers MUST also gate on the low bits that
+    // the encoding pins to zero — otherwise `STRH Rd,[Rn,#-off]` and
+    // `STRH Rd,[Rn,#-off]!` false-match here. Bits[27:20] alone do not
+    // distinguish them from MRS / MSR-reg because bit[7]=1 in halfword
+    // transfers lives outside the original 0x0FB00000 mask. Tighten each
+    // recognizer to the exact SBO / SBZ fields:
+    //   MRS     → bits[19:16]=1111 (SBO), bits[11:0]=0          (0x0FBF0FFFu)
+    //   MSR reg → bits[15:12]=1111 (SBO), bits[11:4]=0          (0x0FB0FFF0u)
+    //   MSR imm → bits[15:12]=1111 (SBO); bit[25]=1 already
+    //             excludes halfword transfers                   (0x0FB0F000u)
+    if ((instr & 0x0FBF0FFFu) == 0x010F0000u) {
         return dispatch_psr_transfer(state, instr, instr_addr);  // MRS
     }
-    if ((instr & 0x0FB00000u) == 0x01200000u) {
+    if ((instr & 0x0FB0FFF0u) == 0x0120F000u) {
         return dispatch_psr_transfer(state, instr, instr_addr);  // MSR reg form
     }
-    if ((instr & 0x0FB00000u) == 0x03200000u) {
+    if ((instr & 0x0FB0F000u) == 0x0320F000u) {
         return dispatch_psr_transfer(state, instr, instr_addr);  // MSR imm form
     }
 

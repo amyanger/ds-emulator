@@ -46,7 +46,7 @@ HalfwordAddress compute_halfword_address(const Arm7State& state, u32 instr);
 u32               load_halfword_unsigned(Arm7Bus& bus, u32 address);       // task 4
 [[maybe_unused]] u32  load_halfword_signed(Arm7Bus& bus, u32 address);     // task 7
 [[maybe_unused]] u32  load_byte_signed(Arm7Bus& bus, u32 address);         // task 6
-[[maybe_unused]] void store_halfword(Arm7Bus& bus, u32 address, u32 value);  // task 5
+void store_halfword(Arm7Bus& bus, u32 address, u32 value);                    // task 5
 
 // Rn==Rd-safe Rd write with optional writeback. On a load where Rn==Rd,
 // the loaded value must win — so we skip the writeback entirely when
@@ -129,8 +129,11 @@ u32 load_byte_signed(Arm7Bus&, u32) {
     return 0;  // TODO(task 6): real LDRSB body
 }
 
-void store_halfword(Arm7Bus&, u32, u32) {
-    // TODO(task 5): real STRH body
+void store_halfword(Arm7Bus& bus, u32 address, u32 value) {
+    // Aligned path only — Task 11 adds the address[0]==1 mask behavior.
+    // We already mask defensively so an odd address still writes to the
+    // aligned halfword without crashing; Task 11 makes this explicit.
+    bus.write16(address & ~1u, static_cast<u16>(value & 0xFFFFu));
 }
 
 void write_rd_and_writeback(Arm7State& state, u32 rd, u32 value,
@@ -156,7 +159,7 @@ void write_rd_and_writeback(Arm7State& state, u32 rd, u32 value,
 
 }  // namespace
 
-u32 dispatch_halfword(Arm7State& state, Arm7Bus& bus, u32 instr, u32 /*instr_addr*/) {
+u32 dispatch_halfword(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
     const bool l  = (instr & (1u << 20)) != 0;
     const u32  sh = (instr >> 5) & 0x3u;
 
@@ -167,9 +170,21 @@ u32 dispatch_halfword(Arm7State& state, Arm7Bus& bus, u32 instr, u32 /*instr_add
                 DS_LOG_WARN("arm7: SWP encoding encountered, not yet supported at 0x%08X",
                             state.pc);
                 break;
-            case 1:
-                DS_LOG_WARN("arm7: STRH not yet implemented at 0x%08X", state.pc);
+            case 1: {
+                const HalfwordAddress addr = compute_halfword_address(state, instr);
+                const u32 rd = (instr >> 12) & 0xFu;
+                // Rd == R15 in a halfword store reads as PC+12, matching the
+                // word-STR pipeline convention (see arm7_loadstore.cpp). No
+                // Rn==Rd suppression here — that rule is load-only per §5.5
+                // of the slice 3b3 design spec; stores always update Rn if
+                // writeback is enabled.
+                const u32 rd_value = (rd == 15) ? (instr_addr + 12u) : state.r[rd];
+                store_halfword(bus, addr.address, rd_value);
+                if (addr.writeback) {
+                    state.r[addr.rn] = addr.writeback_rn;
+                }
                 break;
+            }
             case 2:
             case 3:
                 DS_LOG_WARN("arm7: LDRD/STRD (ARMv5TE) on ARM7 at 0x%08X", state.pc);
