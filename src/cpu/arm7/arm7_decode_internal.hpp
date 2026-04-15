@@ -65,6 +65,11 @@ u32 execute_dp_op(Arm7State& state,
                   u32 rd,
                   u32 instr_addr);
 
+// Shared BX executor: CPSR.T ← rm_value[0], PC ← rm_value aligned for
+// the target state. Used by ARM state BX (dispatch_000_space) and the
+// upcoming Thumb BX handler (slice 3c).
+u32 execute_bx(Arm7State& state, u32 rm_value);
+
 u32 dispatch_branch(Arm7State& state, u32 instr);
 u32 dispatch_single_data_transfer(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr);
 

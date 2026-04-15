@@ -10,14 +10,7 @@ namespace ds {
 u32 dispatch_000_space(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
     if ((instr & 0x0FFF'FFF0u) == 0x012F'FF10u) {
         const u32 rm = instr & 0xFu;
-        const u32 rm_val = state.r[rm];
-        const bool thumb = (rm_val & 0x1u) != 0;
-        const u32 target = thumb ? (rm_val & ~0x1u) : (rm_val & ~0x3u);
-        if (thumb) {
-            state.cpsr |= (1u << 5);
-        }
-        write_rd(state, 15, target);
-        return 1;
+        return execute_bx(state, state.r[rm]);
     }
 
     // SWP / SWPB (spec §5.3). Must precede the multiply and halfword
