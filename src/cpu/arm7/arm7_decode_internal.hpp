@@ -62,6 +62,11 @@ u32 dispatch_single_data_transfer(Arm7State& state, Arm7Bus& bus, u32 instr, u32
 // arm7_decode.cpp and does not pass through here.
 u32 dispatch_000_space(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr);
 
+// Block data transfer (LDM / STM). Called from dispatch_arm for the
+// bits[27:25] == 100 primary slot. Scaffolded in commit 3 as a warn
+// stub; actual LDM/STM semantics land in commits 4-15.
+u32 dispatch_block(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr);
+
 // Multiply family dispatcher. Called from dispatch_000_space after the
 // multiply recognizer matches ((instr & 0x0F0000F0) == 0x00000090).
 u32 dispatch_multiply(Arm7State& state, u32 instr, u32 instr_addr);

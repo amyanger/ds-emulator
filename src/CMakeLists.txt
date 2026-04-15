@@ -15,6 +15,7 @@ add_library(ds_core STATIC
     cpu/arm7/arm7_multiply.cpp
     cpu/arm7/arm7_psr.cpp
     cpu/arm7/arm7_halfword.cpp
+    cpu/arm7/arm7_block.cpp
 )
 target_include_directories(ds_core
     PUBLIC  ${CMAKE_SOURCE_DIR}/include

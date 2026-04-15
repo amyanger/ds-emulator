@@ -34,9 +34,7 @@ u32 dispatch_arm(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
     case 0b011:
         return dispatch_single_data_transfer(state, bus, instr, instr_addr);
     case 0b100:
-        // LDM / STM — deferred to slice 3b2.
-        DS_LOG_WARN("arm7: LDM/STM form 0x%08X at 0x%08X", instr, instr_addr);
-        return 1;
+        return dispatch_block(state, bus, instr, instr_addr);
     case 0b101:
         return dispatch_branch(state, instr);
     case 0b110:
