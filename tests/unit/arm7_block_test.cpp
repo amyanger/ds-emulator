@@ -442,6 +442,98 @@ static void test_stmdb_normalization_smoke() {
     REQUIRE(nds.cpu7().state().r[0] == kFirstWr);
 }
 
+// Commit 9: STM with Rn in the register list, Rn is the LOWEST-
+// numbered set bit. ARMv4 rule (§5.5, GBATEK "Strange Effects on
+// Invalid Rlist's"): store the ORIGINAL Rn value at the i == Rn slot,
+// then apply writeback (if W=1) at the end. The writeback rule falls
+// out of §4.3's "compute wb_value up front" normalization — the loop
+// reads state.r[Rn] unchanged on the first iteration because we did
+// NOT apply the early writeback.
+//
+// Encoding: STMIA R0!, {R0, R1, R2}
+//   cond=AL, bits[27:25]=100, P=0, U=1, S=0, W=1, L=0,
+//   Rn=0, reg_list = 0x0007 → 0xE8A0'0007.
+static void test_stm_rn_in_list_lowest() {
+    NDS nds;
+
+    constexpr u32 kStmBase = 0x0380'0200u;
+    nds.cpu7().state().r[0] = kStmBase;
+    nds.cpu7().state().r[1] = 0x1111'1111u;
+    nds.cpu7().state().r[2] = 0x2222'2222u;
+
+    // Clear the target range so any stale store is visible.
+    nds.arm7_bus().write32(kStmBase + 0u, 0u);
+    nds.arm7_bus().write32(kStmBase + 4u, 0u);
+    nds.arm7_bus().write32(kStmBase + 8u, 0u);
+
+    const u64 cycles_before = nds.cpu7().state().cycles;
+
+    run_one(nds, kBase, 0xE8A0'0007u);
+
+    // Memory at kStmBase holds the ORIGINAL R0 (=kStmBase), not the
+    // post-writeback value. R1/R2 walk in at +4 and +8 low→high.
+    REQUIRE(nds.arm7_bus().read32(kStmBase + 0u) == kStmBase);
+    REQUIRE(nds.arm7_bus().read32(kStmBase + 4u) == 0x1111'1111u);
+    REQUIRE(nds.arm7_bus().read32(kStmBase + 8u) == 0x2222'2222u);
+
+    // End-of-instruction writeback still applies because the STM-early
+    // path was not taken (Rn was lowest). Rn = kStmBase + 4*3.
+    REQUIRE(nds.cpu7().state().r[0] == kStmBase + 0x0Cu);
+    REQUIRE(nds.cpu7().state().r[1] == 0x1111'1111u);
+    REQUIRE(nds.cpu7().state().r[2] == 0x2222'2222u);
+
+    REQUIRE(nds.cpu7().state().pc == kBase + 4u);
+    REQUIRE(nds.cpu7().state().cycles == cycles_before + 1u);
+}
+
+// Commit 9: STM with Rn in the register list, Rn is NOT the lowest-
+// numbered set bit. ARMv4 rule (§5.5): apply writeback BEFORE the
+// transfer loop so the i == Rn iteration stores the NEW (post-
+// writeback) Rn value. The end-of-instruction writeback is suppressed
+// to avoid writing wb_value twice.
+//
+// Encoding: STMIA R2!, {R1, R2, R3}
+//   cond=AL, bits[27:25]=100, P=0, U=1, S=0, W=1, L=0,
+//   Rn=2, reg_list = 0x000E → 0xE8A2'000E.
+//
+// With R1 = 0x1111'1111, R2 = kStmBase, R3 = 0x3333'3333, we expect:
+//   memory[kStmBase + 0] == 0x1111'1111        (R1 original)
+//   memory[kStmBase + 4] == kStmBase + 0xC     (R2 NEW, post-writeback)
+//   memory[kStmBase + 8] == 0x3333'3333        (R3 original)
+//   R2 final == kStmBase + 0xC                  (writeback already applied)
+static void test_stm_rn_in_list_not_lowest() {
+    NDS nds;
+
+    constexpr u32 kStmBase = 0x0380'0200u;
+    nds.cpu7().state().r[1] = 0x1111'1111u;
+    nds.cpu7().state().r[2] = kStmBase;
+    nds.cpu7().state().r[3] = 0x3333'3333u;
+
+    nds.arm7_bus().write32(kStmBase + 0u, 0u);
+    nds.arm7_bus().write32(kStmBase + 4u, 0u);
+    nds.arm7_bus().write32(kStmBase + 8u, 0u);
+
+    const u64 cycles_before = nds.cpu7().state().cycles;
+
+    run_one(nds, kBase, 0xE8A2'000Eu);
+
+    // §5.5 key assertion: R2's slot holds the POST-writeback base,
+    // not the original kStmBase. This is the whole point of the
+    // "apply writeback early" dance in dispatch_block.
+    REQUIRE(nds.arm7_bus().read32(kStmBase + 0u) == 0x1111'1111u);
+    REQUIRE(nds.arm7_bus().read32(kStmBase + 4u) == kStmBase + 0x0Cu);
+    REQUIRE(nds.arm7_bus().read32(kStmBase + 8u) == 0x3333'3333u);
+
+    // R2 holds the new base after the instruction. R1 and R3 were
+    // only sources and are unchanged.
+    REQUIRE(nds.cpu7().state().r[1] == 0x1111'1111u);
+    REQUIRE(nds.cpu7().state().r[2] == kStmBase + 0x0Cu);
+    REQUIRE(nds.cpu7().state().r[3] == 0x3333'3333u);
+
+    REQUIRE(nds.cpu7().state().pc == kBase + 4u);
+    REQUIRE(nds.cpu7().state().cycles == cycles_before + 1u);
+}
+
 // Direct-call tests for the addressing-mode normalization helpers in
 // arm7_block_internal.hpp. These cover every row of the §5.4 table and
 // the §5.8 empty-list case without standing up an NDS harness. Commit 5
@@ -586,9 +678,11 @@ int main() {
     test_ldm_ia_writeback();
     test_all_addressing_modes();
     test_stmdb_normalization_smoke();
+    test_stm_rn_in_list_lowest();
+    test_stm_rn_in_list_not_lowest();
     test_block_addressing_helpers();
 
     std::puts("arm7_block_test: LDM/STM IA base cases + {IA,IB,DA,DB} matrix + DB "
-              "normalization + helpers verified");
+              "normalization + STM Rn-in-list old/new base + helpers verified");
     return 0;
 }
