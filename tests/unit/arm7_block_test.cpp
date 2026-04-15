@@ -817,6 +817,107 @@ static void test_ldm_s1_user_bank_from_fiq() {
     REQUIRE(s.pc == kBase + 4u);
 }
 
+// Commit 14: LDM with S=1 AND R15 in the list — the ARMv4
+// exception-return form. Spec §5.6 case 3 + §4.4 LDM step 6:
+// the transfer loop runs in the CURRENT mode, and after the loop
+// CPSR is restored from SPSR_<mode> (rebanking R8..R14 to match the
+// caller's mode) before the deferred R15 commit. The net effect of
+// a typical `LDMFD SP, {PC}^` from IRQ is: pop the return PC from
+// IRQ's stack, restore the caller's CPSR (including mode bits), and
+// branch to the popped PC in the caller's mode.
+//
+// Encoding: LDM R0, {PC}^   (P=0, U=1, S=1, W=0, L=1)
+//   cond=AL, bits[27:25]=100, Rn=0, reg_list = 0x8000
+//   → 0xE8D0'8000.
+static void test_ldm_s1_r15_exception_return() {
+    NDS nds;
+    auto& s = nds.cpu7().state();
+
+    constexpr u32 kLdmBase = 0x0380'0200u;
+    constexpr u32 kBranchTarget = 0x0380'1000u; // aligned
+    constexpr u32 kSvcR13 = 0x5C5C'5013u;
+    constexpr u32 kSvcR14 = 0x5C5C'5014u;
+    constexpr u32 kIrqR13 = 0xE110'0013u;
+    constexpr u32 kIrqR14 = 0xE110'0014u;
+    // Target CPSR saved in SPSR_IRQ: N=1 flag set, mode=SVC (0x13),
+    // interrupt masks clear, T=0. This is what IRQ's SPSR would hold
+    // if the caller was executing in SVC mode with N=1 at the
+    // moment the exception fired.
+    constexpr u32 kSpsrIrq = 0x8000'0013u;
+
+    // Default post-reset mode is Supervisor. Seed SVC's R13/R14.
+    REQUIRE(s.current_mode() == Mode::Supervisor);
+    s.r[13] = kSvcR13;
+    s.r[14] = kSvcR14;
+
+    // Switch to IRQ, seed IRQ's R13/R14 and Rn (R0 is non-banked).
+    s.switch_mode(Mode::Irq);
+    s.r[13] = kIrqR13;
+    s.r[14] = kIrqR14;
+    s.r[0] = kLdmBase;
+
+    // Seed SPSR_IRQ with the caller's saved CPSR.
+    s.banks.spsr_irq = kSpsrIrq;
+
+    // Put the return PC in memory.
+    nds.arm7_bus().write32(kLdmBase + 0u, kBranchTarget);
+
+    const u64 cycles_before = s.cycles;
+
+    run_one(nds, kBase, 0xE8D0'8000u);
+
+    // After the instruction:
+    //  - CPSR = kSpsrIrq verbatim (flags + mode + masks + T bit all
+    //    restored).
+    //  - Mode is now SVC (restored from the low 5 bits of SPSR).
+    //  - R13/R14 are SVC's values, proving the rebank happened.
+    //  - R15/PC hold the word-aligned branch target.
+    REQUIRE(s.cpsr == kSpsrIrq);
+    REQUIRE(s.current_mode() == Mode::Supervisor);
+    REQUIRE(s.r[13] == kSvcR13);
+    REQUIRE(s.r[14] == kSvcR14);
+    REQUIRE(s.r[15] == kBranchTarget);
+    REQUIRE(s.pc == kBranchTarget);
+
+    // One ARM7 cycle consumed — the placeholder cycle budget is
+    // still 1 across all LDM/STM forms.
+    REQUIRE(s.cycles == cycles_before + 1u);
+}
+
+// Commit 14: LDM S=1 with R15 from a mode without an SPSR (User or
+// System). Real hardware flags this as UNPREDICTABLE; we warn and
+// leave CPSR unchanged, but still perform the R15 branch so the
+// instruction doesn't become a silent NOP.
+//
+// Encoding is identical to the happy-path test — the only difference
+// is the starting mode.
+static void test_ldm_s1_r15_exception_return_no_spsr_warn() {
+    NDS nds;
+    auto& s = nds.cpu7().state();
+
+    constexpr u32 kLdmBase = 0x0380'0200u;
+    constexpr u32 kBranchTarget = 0x0380'2000u;
+
+    // Enter System mode — it has no SPSR slot (spsr_slot() returns
+    // nullptr) but is distinct from User so we can tell it apart.
+    s.switch_mode(Mode::System);
+    s.r[0] = kLdmBase;
+    const u32 cpsr_before = s.cpsr;
+
+    nds.arm7_bus().write32(kLdmBase + 0u, kBranchTarget);
+
+    run_one(nds, kBase, 0xE8D0'8000u);
+
+    // CPSR is UNCHANGED — no SPSR to restore from. Mode stays System.
+    REQUIRE(s.cpsr == cpsr_before);
+    REQUIRE(s.current_mode() == Mode::System);
+
+    // The branch still happens — spec §5.6 case 3 says "still
+    // perform the R15 load and branch" on the warn path.
+    REQUIRE(s.r[15] == kBranchTarget);
+    REQUIRE(s.pc == kBranchTarget);
+}
+
 // Direct-call tests for the addressing-mode normalization helpers in
 // arm7_block_internal.hpp. These cover every row of the §5.4 table and
 // the §5.8 empty-list case without standing up an NDS harness. Commit 5
@@ -968,11 +1069,14 @@ int main() {
     test_stm_r15_in_list();
     test_stm_s1_user_bank_from_fiq();
     test_ldm_s1_user_bank_from_fiq();
+    test_ldm_s1_r15_exception_return();
+    test_ldm_s1_r15_exception_return_no_spsr_warn();
     test_block_addressing_helpers();
 
     std::puts("arm7_block_test: LDM/STM IA base cases + {IA,IB,DA,DB} matrix + DB "
               "normalization + STM Rn-in-list old/new base + LDM Rn-in-list "
               "writeback suppression + LDM/STM R15-in-list (S=0) + LDM/STM "
-              "S=1 user-bank transfer from FIQ + helpers verified");
+              "S=1 user-bank transfer from FIQ + LDM S=1 R15 exception return "
+              "(IRQ→SVC and System warn path) + helpers verified");
     return 0;
 }

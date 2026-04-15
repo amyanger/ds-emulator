@@ -30,15 +30,18 @@
 // TRM PC-ahead-by-12 convention for STM. Commit 13 adds S=1 without
 // R15 in the list: the transfer loop runs against the User bank via
 // switch_mode(User), with a matching switch_mode(original_mode) once
-// the loop completes. The base address is computed BEFORE the swap
-// so Rn is read in the current mode, and the end-of-instruction
-// writeback lands back in the current mode after the swap-back.
-// S=1 + W=1 is UNPREDICTABLE on real hardware — we warn and still
-// perform writeback (melonDS parity). The §4.3 normalization in
+// the loop completes. Commit 14 adds the final S-bit form — LDM
+// with S=1 AND R15 in the list (the exception-return encoding). The
+// transfer loop runs in the CURRENT mode (not User), and after the
+// loop the current mode's SPSR is restored into CPSR and the
+// register file rebanks to the caller's mode before the deferred
+// R15 commit and the end-of-instruction writeback. If the current
+// mode has no SPSR (User / System), CPSR is left unchanged with a
+// warn and the branch still happens. The §4.3 normalization in
 // compute_block_addressing means the transfer loop itself is
-// mode-agnostic — only the start_addr and wb_value change. The
-// remaining constraints (LDM S=1 with R15, empty list) stay in
-// place and are wired up in their dedicated follow-up commits.
+// mode-agnostic — only the start_addr and wb_value change. Only
+// the empty-list quirk (commit 15) still falls through to the warn
+// stub.
 
 #include "bus/arm7_bus.hpp"
 #include "cpu/arm7/arm7_block_internal.hpp"
@@ -90,14 +93,13 @@ u32 dispatch_block(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
 
     // Supported today: all four addressing modes (any {P, U}), free W,
     // non-empty list, Rn in list (both families), R15 in list (both
-    // families), and S=1 without R15 in the list (user-bank transfer,
-    // commit 13). LDM S=1 WITH R15 in the list (the exception-return
-    // form) and the empty-list quirk still fall through to the warn
-    // stub.
+    // families), and every S-bit form — user-bank transfer for S=1
+    // without R15 (commit 13) and the exception-return form for LDM
+    // S=1 with R15 (commit 14). Only the empty-list quirk still falls
+    // through to the warn stub.
     const bool rn_in_list = (reg_list & (1u << rn)) != 0u;
     const bool r15_in_list = (reg_list & (1u << 15)) != 0u;
-    const bool ldm_s_with_r15_unsupported = l_bit && s_bit && r15_in_list;
-    const bool is_supported = reg_list != 0u && !ldm_s_with_r15_unsupported;
+    const bool is_supported = reg_list != 0u;
 
     if (!is_supported) {
         DS_LOG_WARN("arm7: LDM/STM path not yet implemented 0x%08X at 0x%08X", instr, instr_addr);
@@ -131,27 +133,32 @@ u32 dispatch_block(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
     }
 
     // S=1 user-bank transfer (spec §5.6 cases 1 and 2, commit 13).
-    // When S=1 and we are NOT in the LDM-R15 exception-return form
-    // (that is commit 14's scope and is gated out above), every
-    // listed register read/written during the transfer loop refers
-    // to the user-bank copy. We implement this by swapping to User
-    // mode around the loop via switch_mode, which saves the current
-    // mode's R8..R14 into its bank and loads the User bank into r[].
-    // The base address was computed above from the CURRENT mode's
-    // Rn (pre-swap), which is correct per spec §4.4 step 2.
+    // S-bit handling splits into two mutually exclusive paths:
     //
-    // S=1 + W=1 is UNPREDICTABLE on real hardware. We warn and still
-    // perform the end-of-instruction writeback (matches melonDS and
-    // keeps the path deterministic). Real code does not use this
-    // encoding.
-    const bool s_user_bank_transfer = s_bit;
+    //   * `ldm_exc_return` — LDM with S=1 AND R15 in the list. This
+    //     is the exception-return form. The transfer loop runs in
+    //     the CURRENT mode (e.g. IRQ), and after the loop the SPSR
+    //     is restored into CPSR and the register file rebanks to
+    //     the caller's mode. Handled below after the transfer loop.
+    //
+    //   * `s_user_bank_transfer` — S=1 without R15 in an LDM list,
+    //     or any STM with S=1. The transfer loop runs against the
+    //     User bank, bracketed by switch_mode calls. See spec §5.6
+    //     cases 1 and 2.
+    //
+    // The base address is computed above from the CURRENT mode's
+    // Rn (pre-swap) per spec §4.4 step 2. The STM Rn-in-list early
+    // writeback also runs pre-swap so it updates the current mode's
+    // Rn. S=1 + W=1 is UNPREDICTABLE on real hardware — we warn and
+    // still perform the end-of-instruction writeback (melonDS parity).
+    const bool ldm_exc_return = l_bit && s_bit && r15_in_list;
+    const bool s_user_bank_transfer = s_bit && !ldm_exc_return;
     const Mode original_mode = state.current_mode();
+    if (s_bit && w_bit) {
+        DS_LOG_WARN(
+            "arm7: LDM/STM with S=1 and W=1 is UNPREDICTABLE 0x%08X at 0x%08X", instr, instr_addr);
+    }
     if (s_user_bank_transfer) {
-        if (w_bit) {
-            DS_LOG_WARN("arm7: LDM/STM with S=1 and W=1 is UNPREDICTABLE 0x%08X at 0x%08X",
-                        instr,
-                        instr_addr);
-        }
         state.switch_mode(Mode::User);
     }
 
@@ -206,22 +213,56 @@ u32 dispatch_block(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
     // Swap back to the original mode before the R15 write and the
     // end-of-instruction writeback. Spec §4.4 step 5 / §5.6: the
     // user-bank transfer is strictly scoped to the transfer loop;
-    // Rn writeback and the R15 commit (for the LDM S=0 form that
-    // lives in commit 11) happen in the caller's original mode so
-    // any banked Rn is the current-mode register, not User.
+    // Rn writeback and the R15 commit happen in the caller's original
+    // mode so any banked Rn is the current-mode register, not User.
     if (s_user_bank_transfer) {
         state.switch_mode(original_mode);
+    }
+
+    // LDM S=1 with R15 — exception-return form (spec §4.4 LDM step 6
+    // case "S == 1", §5.6 case 3). Restore CPSR from SPSR_<mode> and
+    // rebank the register file to the caller's mode BEFORE writing
+    // R15 and running the end-of-instruction writeback. If the current
+    // mode has no SPSR (User / System), this is UNPREDICTABLE on real
+    // hardware — warn and leave CPSR unchanged, but still perform the
+    // R15 branch per spec.
+    //
+    // Implementation detail: we read SPSR, extract the target mode
+    // bits, call switch_mode(target) BEFORE overwriting cpsr. That
+    // order ensures switch_mode's internal `store_banked_registers`
+    // uses the CURRENT (pre-restore) mode — otherwise it would save
+    // the live register file into the TARGET bank and corrupt it.
+    // The final `cpsr = spsr_value` write sets the flags/interrupt
+    // masks; mode bits already match because switch_mode set them.
+    if (ldm_exc_return) {
+        u32* spsr_ptr = state.spsr_slot();
+        if (spsr_ptr == nullptr) {
+            DS_LOG_WARN("arm7: LDM S=1 with R15 from mode without SPSR (User/System) "
+                        "0x%08X at 0x%08X",
+                        instr,
+                        instr_addr);
+        } else {
+            const u32 spsr_value = *spsr_ptr;
+            // Invalid SPSR mode bits are UNPREDICTABLE on real HW.
+            // Real code always saves a valid 5-bit mode into SPSR; an
+            // invalid value would hit the assert() in Arm7State's
+            // banked-register switch and abort in debug — acceptable
+            // because no legitimate program ever produces this.
+            const Mode target_mode = static_cast<Mode>(spsr_value & 0x1Fu);
+            state.switch_mode(target_mode);
+            state.cpsr = spsr_value;
+        }
     }
 
     // R15 write for LDM with R15 in the list (spec §4.4 LDM step 6,
     // §5.7). ARMv4: word-align the loaded value and write it into
     // both state.r[15] and state.pc; CPSR.T is NEVER touched by LDM
-    // on ARMv4 (that's an ARMv5-only interworking behavior). The
-    // S=1 exception-return form — which would restore CPSR from
-    // SPSR around this write — is still gated to the warn stub in
-    // this commit (commit 14). `write_rd` stores the given value
-    // in r[15] and always masks pc, so passing the pre-aligned
-    // value puts the same bits in both fields.
+    // on ARMv4 (that's an ARMv5-only interworking behavior). For the
+    // S=1 exception-return form, CPSR has already been restored from
+    // SPSR above, so this R15 write lands in the caller's context.
+    // `write_rd` stores the given value in r[15] and always masks pc,
+    // so passing the pre-aligned value puts the same bits in both
+    // fields.
     if (r15_loaded) {
         write_rd(state, 15, loaded_pc & ~0x3u);
     }
