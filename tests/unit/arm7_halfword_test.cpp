@@ -1078,6 +1078,163 @@ static void test_ldrsh_rd_eq_r15_writes_pc_word_aligned() {
     REQUIRE(nds.cpu7().state().r[0] == 0x0380'0B00u); // Rn untouched
 }
 
+// ---- Malformed encoding warn paths (deterministic, no crash) --------------
+//
+// Per §5.8 of the slice 3b3 design, the halfword decoder must handle six
+// malformed or out-of-scope encodings without crashing. Each logs a warn and
+// either no-ops (SH-slot cases that collide with SWP/LDRD/STRD/reserved) or
+// proceeds with a deterministic interpretation (P=0 W=1, Rm==15). These tests
+// exercise each path and assert the observable state after the instruction.
+
+// L=0 SH=0 — collides with SWP encoding territory. No memory or register
+// change; dispatch_halfword warns and breaks out of the switch before
+// compute_halfword_address runs.
+static void test_malformed_l0_sh0_swp_slot_is_noop() {
+    NDS nds;
+    nds.cpu7().state().r[0] = 0xABCD'1234u;
+    nds.cpu7().state().r[1] = 0x0380'0C00u;
+    nds.arm7_bus().write16(0x0380'0C00u, 0xBEEFu); // sentinel
+
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 0,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                /*SH*/ 0,
+                                /*off*/ 0));
+
+    REQUIRE(nds.cpu7().state().r[0] == 0xABCD'1234u);        // Rd untouched
+    REQUIRE(nds.cpu7().state().r[1] == 0x0380'0C00u);        // Rn untouched
+    REQUIRE(nds.arm7_bus().read16(0x0380'0C00u) == 0xBEEFu); // memory untouched
+}
+
+// L=0 SH=2 — collides with LDRD (ARMv5TE+, not valid on ARM7). No-op.
+static void test_malformed_l0_sh2_ldrd_slot_is_noop() {
+    NDS nds;
+    nds.cpu7().state().r[0] = 0xABCD'1234u;
+    nds.cpu7().state().r[1] = 0x0380'0D00u;
+    nds.arm7_bus().write16(0x0380'0D00u, 0xCAFEu);
+
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 0,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                /*SH*/ 2,
+                                /*off*/ 0));
+
+    REQUIRE(nds.cpu7().state().r[0] == 0xABCD'1234u);
+    REQUIRE(nds.cpu7().state().r[1] == 0x0380'0D00u);
+    REQUIRE(nds.arm7_bus().read16(0x0380'0D00u) == 0xCAFEu);
+}
+
+// L=0 SH=3 — collides with STRD (ARMv5TE+, not valid on ARM7). No-op.
+static void test_malformed_l0_sh3_strd_slot_is_noop() {
+    NDS nds;
+    nds.cpu7().state().r[0] = 0xABCD'1234u;
+    nds.cpu7().state().r[1] = 0x0380'0E00u;
+    nds.arm7_bus().write16(0x0380'0E00u, 0xF00Du);
+
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 0,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                /*SH*/ 3,
+                                /*off*/ 0));
+
+    REQUIRE(nds.cpu7().state().r[0] == 0xABCD'1234u);
+    REQUIRE(nds.cpu7().state().r[1] == 0x0380'0E00u);
+    REQUIRE(nds.arm7_bus().read16(0x0380'0E00u) == 0xF00Du);
+}
+
+// L=1 SH=0 — reserved on ARM7. No-op.
+static void test_malformed_l1_sh0_reserved_is_noop() {
+    NDS nds;
+    nds.cpu7().state().r[0] = 0xABCD'1234u;
+    nds.cpu7().state().r[1] = 0x0380'0F00u;
+    nds.arm7_bus().write16(0x0380'0F00u, 0xDEADu);
+
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 1,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                /*SH*/ 0,
+                                /*off*/ 0));
+
+    REQUIRE(nds.cpu7().state().r[0] == 0xABCD'1234u);
+    REQUIRE(nds.cpu7().state().r[1] == 0x0380'0F00u);
+    REQUIRE(nds.arm7_bus().read16(0x0380'0F00u) == 0xDEADu);
+}
+
+// P=0 W=1 — the W bit must be zero when P=0 per GBATEK; post-index already
+// writes back. compute_halfword_address warns and proceeds (the post-index
+// writeback still fires, as if W were 0). Verify the load succeeds and Rn
+// advances by the post-index offset.
+static void test_malformed_p0_w1_post_index_still_writes_back() {
+    NDS nds;
+    nds.cpu7().state().r[1] = 0x0380'1000u;
+    nds.arm7_bus().write16(0x0380'1000u, 0x1234u); // read at original Rn
+
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 0,
+                                /*U*/ 1,
+                                /*W*/ 1,
+                                /*L*/ 1,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHhalf,
+                                /*off*/ 8));
+
+    REQUIRE(nds.cpu7().state().r[0] == 0x0000'1234u); // loaded from orig Rn
+    REQUIRE(nds.cpu7().state().r[1] == 0x0380'1008u); // post-index writeback
+}
+
+// I=0 Rm==15 — GBATEK reserves R0-R14 for the register-offset form. We read
+// r[15] for determinism. With state.r[15] = pc + 8 baked in by step_arm(),
+// the offset is pc + 8. The load reads at Rn + (pc + 8).
+static void test_malformed_reg_offset_rm_eq_15_uses_pc_plus_8() {
+    NDS nds;
+    // Choose Rn so Rn + (kBase + 8) lands on a writable aligned halfword.
+    // kBase = 0x03800000; pc+8 = 0x03800008; Rn picked so target = 0x03801100.
+    nds.cpu7().state().r[1] = 0x0380'1100u - 0x0380'0008u; // 0x000010F8
+    nds.arm7_bus().write16(0x0380'1100u, 0x5A5Au);
+
+    run_one(nds,
+            kBase,
+            encode_halfword_reg(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 1,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHhalf,
+                                /*Rm*/ 15));
+
+    REQUIRE(nds.cpu7().state().r[0] == 0x0000'5A5Au);
+    REQUIRE(nds.cpu7().state().r[1] == 0x0000'10F8u); // Rn untouched (W=0)
+}
+
 int main() {
     test_ldrh_imm_preindex_up_no_writeback();
     test_ldrh_imm_preindex_up_writeback();
@@ -1126,6 +1283,13 @@ int main() {
     test_ldrh_rd_eq_r15_writes_pc_word_aligned();
     test_ldrsb_rd_eq_r15_writes_pc_word_aligned();
     test_ldrsh_rd_eq_r15_writes_pc_word_aligned();
+
+    test_malformed_l0_sh0_swp_slot_is_noop();
+    test_malformed_l0_sh2_ldrd_slot_is_noop();
+    test_malformed_l0_sh3_strd_slot_is_noop();
+    test_malformed_l1_sh0_reserved_is_noop();
+    test_malformed_p0_w1_post_index_still_writes_back();
+    test_malformed_reg_offset_rm_eq_15_uses_pc_plus_8();
 
     std::puts("arm7_halfword_test: all LDRH, STRH, LDRSB, and LDRSH cases passed");
     return 0;
