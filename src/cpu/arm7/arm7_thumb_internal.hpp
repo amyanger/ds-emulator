@@ -15,4 +15,28 @@ class Arm7Bus;
 // consumed (1 per instruction in slice 3c — coarse cost model).
 u32 dispatch_thumb(Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr);
 
+// --- Per-family Thumb dispatchers (called from dispatch_thumb) ----
+// Each receives two pre-materialized PC values:
+//   pc_read    = instr_addr + 4  (R15 during Thumb execute)
+//   pc_literal = (instr_addr + 4) & ~2  (word-aligned, for literal-pool formats)
+// Format handlers that need the literal-pool PC use pc_literal;
+// everything else reads state.r[15] directly (== pc_read).
+
+u32 dispatch_thumb_shift_or_addsub(
+    Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
+u32 dispatch_thumb_imm_dp(
+    Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
+u32 dispatch_thumb_010_space(
+    Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
+u32 dispatch_thumb_ldst_imm_wb(
+    Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
+u32 dispatch_thumb_100_space(
+    Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
+u32 dispatch_thumb_101_space(
+    Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
+u32 dispatch_thumb_110_space(
+    Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
+u32 dispatch_thumb_111_space(
+    Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
+
 } // namespace ds

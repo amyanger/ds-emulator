@@ -1,9 +1,8 @@
-// Slice 3c commit 6 smoke test: verify that Arm7::run_until correctly
-// routes to step_thumb when CPSR.T=1, that the Thumb fetch uses
-// 16-bit reads, and that PC advances by 2 per Thumb instruction.
-// The bucket handlers are warn stubs returning 1 cycle — no format
-// decode logic exists yet. This test proves the routing skeleton
-// is correct before any format lands in Phase C.
+// Slice 3c commits 6–7 smoke tests: verify that Arm7::run_until
+// correctly routes to step_thumb when CPSR.T=1, that the Thumb fetch
+// uses 16-bit reads, that PC advances by 2 per Thumb instruction,
+// and that the R15 pipeline-prefetch value (instr_addr + 4) is set
+// correctly for both word-aligned and halfword-aligned start addresses.
 
 #include "bus/arm7_bus.hpp"
 #include "cpu/arm7/arm7.hpp"
@@ -54,8 +53,33 @@ static void thumb_dispatch_covers_all_eight_buckets() {
     REQUIRE(nds.cpu7().state().cycles == 8u);
 }
 
+// Commit 7: verify R15 is instr_addr + 4 when starting at a
+// non-word-aligned address (instr_addr % 4 == 2). This is where
+// pc_read and pc_literal diverge: pc_read = addr+4 (not word-aligned),
+// pc_literal = (addr+4) & ~2 (word-aligned). Bucket handlers are
+// still stubs, so we can only verify the externally visible R15 value
+// here. The pc_literal path gets tested when format handlers land.
+static void thumb_r15_correct_at_halfword_aligned_addr() {
+    NDS nds;
+    // Start at an address where instr_addr % 4 == 2.
+    const u32 base = 0x0380'0002u;
+
+    nds.arm7_bus().write16(base, 0x0000); // bucket 000 stub
+
+    nds.cpu7().state().pc = base;
+    nds.cpu7().state().cpsr |= (1u << 5);
+
+    nds.cpu7().run_until(2);
+
+    REQUIRE(nds.cpu7().state().pc == base + 2);
+    // R15 = instr_addr + 4 = 0x0380'0006 (not word-aligned)
+    REQUIRE(nds.cpu7().state().r[15] == base + 4u);
+    REQUIRE(nds.cpu7().state().cycles == 1u);
+}
+
 int main() {
     thumb_run_until_advances_pc_by_two_and_consumes_one_cycle();
     thumb_dispatch_covers_all_eight_buckets();
+    thumb_r15_correct_at_halfword_aligned_addr();
     return 0;
 }
