@@ -67,6 +67,12 @@ u32 dispatch_000_space(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr
 // stub; actual LDM/STM semantics land in commits 4-15.
 u32 dispatch_block(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr);
 
+// Single data swap (SWP / SWPB). Called from dispatch_000_space when
+// the (instr & 0x0FB00FF0) == 0x01000090 recognizer matches. SWP is
+// routed before the multiply/halfword recognizers so the bit pattern
+// cannot be mis-claimed.
+u32 dispatch_swap(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr);
+
 // Multiply family dispatcher. Called from dispatch_000_space after the
 // multiply recognizer matches ((instr & 0x0F0000F0) == 0x00000090).
 u32 dispatch_multiply(Arm7State& state, u32 instr, u32 instr_addr);

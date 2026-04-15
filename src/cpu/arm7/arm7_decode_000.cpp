@@ -20,6 +20,13 @@ u32 dispatch_000_space(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr
         return 1;
     }
 
+    // SWP / SWPB (spec §5.3). Must precede the multiply and halfword
+    // recognizers. Mask 0x0FB00FF0 pins bits[27:23]=00010, bits[21:20]=00,
+    // and bits[11:4]=00001001. Bit 22 (B) is left free.
+    if ((instr & 0x0FB00FF0u) == 0x01000090u) {
+        return dispatch_swap(state, bus, instr, instr_addr);
+    }
+
     if ((instr & 0x0F0000F0u) == 0x00000090u) {
         return dispatch_multiply(state, instr, instr_addr);
     }
