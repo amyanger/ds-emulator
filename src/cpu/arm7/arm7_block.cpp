@@ -3,11 +3,10 @@
 // ARMv4T block data transfer instructions (LDM / STM). Dispatched from
 // dispatch_arm() for the bits[27:25] == 100 primary slot.
 //
-// Commit 4 of slice 3b4 introduces the addressing-mode normalization
-// helpers (see spec §4.3 and §5.4) but does NOT yet wire them into
-// dispatch_block — that happens in commit 5. For now dispatch_block is
-// still the commit-3 warn stub so the primary-dispatch routing stays
-// proven while the per-opcode semantics are built up incrementally.
+// Commit 5 of slice 3b4 lights up the very first real execution path
+// through dispatch_block: plain `STM IA` with W=0, S=0, L=0, Rn not in
+// list, and R15 not in list. Every other encoding still falls through
+// to the warn stub until its dedicated commit (6–15) enables it.
 
 #include "bus/arm7_bus.hpp"
 #include "cpu/arm7/arm7_block_internal.hpp"
@@ -49,9 +48,38 @@ u32 dispatch_block(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
     // TODO(cycles): LDM/STM have variable cycle counts (nS+1N+1I /
     // (n-1)S+2N). Returning 1 as a placeholder until the cycle-accuracy
     // slice.
-    (void) state;
-    (void) bus;
-    DS_LOG_WARN("arm7: LDM/STM not implemented yet 0x%08X at 0x%08X", instr, instr_addr);
+    const bool p_bit = ((instr >> 24) & 1u) != 0;
+    const bool u_bit = ((instr >> 23) & 1u) != 0;
+    const bool s_bit = ((instr >> 22) & 1u) != 0;
+    const bool w_bit = ((instr >> 21) & 1u) != 0;
+    const bool l_bit = ((instr >> 20) & 1u) != 0;
+    const u32 rn = (instr >> 16) & 0xFu;
+    const u32 reg_list = instr & 0xFFFFu;
+
+    // Commit 5 implements only the simplest STM IA encoding: W=0, S=0,
+    // L=0, post-increment (P=0), up (U=1), Rn not in list, R15 not in
+    // list, non-empty list. Every other path stays on the warn stub
+    // until its dedicated follow-up commit wires it up.
+    const bool is_base_case_stm_ia = !l_bit && !s_bit && !w_bit && !p_bit && u_bit &&
+                                     reg_list != 0u && ((reg_list & (1u << rn)) == 0u) &&
+                                     ((reg_list & (1u << 15)) == 0u);
+
+    if (!is_base_case_stm_ia) {
+        DS_LOG_WARN("arm7: LDM/STM path not yet implemented 0x%08X at 0x%08X", instr, instr_addr);
+        return 1;
+    }
+
+    const auto addressing =
+        arm7_block_detail::compute_block_addressing(state.r[rn], reg_list, p_bit, u_bit);
+    (void) addressing.wb_value; // writeback lands in commit 7
+
+    u32 addr = addressing.start_addr;
+    for (u32 i = 0; i < 16; ++i) {
+        if ((reg_list & (1u << i)) != 0u) {
+            bus.write32(addr & ~0x3u, state.r[i]);
+            addr += 4u;
+        }
+    }
     return 1;
 }
 

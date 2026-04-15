@@ -1,10 +1,10 @@
-// arm7_block_test.cpp — scaffold test for the ARMv4T block data transfer
-// (LDM / STM) dispatcher. Commit 3 of slice 3b4 only wires dispatch_block
-// into the primary dispatch table as a warn stub; this test verifies the
-// wiring by executing a recognizable LDM/STM encoding and confirming the
-// stub behaves as a no-op (PC advances 4, cycles increment by 1, register
-// file otherwise unchanged). Real LDM/STM semantics land in commits 4-15
-// and will be covered by dedicated tests.
+// arm7_block_test.cpp — ARMv4T block data transfer (LDM / STM) tests.
+// Grown incrementally across slice 3b4: commit 3 proved the warn-stub
+// dispatch wiring, commit 4 verified the addressing-mode helpers in
+// isolation, and commit 5 promotes the STMIA scaffold test into the
+// first real-execution test — simplest STM IA base case (W=0, S=0,
+// Rn not in list, R15 not in list). LDMIA is still a warn stub, so
+// its scaffold test stays in place.
 
 #include "bus/arm7_bus.hpp"
 #include "cpu/arm7/arm7.hpp"
@@ -82,24 +82,40 @@ static void test_dispatch_block_stub_ldmia_does_not_crash() {
     require_regs_unchanged(before, nds.cpu7().state());
 }
 
-// STMIA R0!, {R1}  — 0xE8A00002
-// Encoding check: cond=AL, bits[27:25]=100, P=0, U=1, S=0, W=1, L=0,
-// Rn=0, reg_list=0x0002. Second-simplest STM form; also routes through
-// the 0b100 slot. Confirms both the L=0 and L=1 cases reach the stub.
-static void test_dispatch_block_stub_stmia_does_not_crash() {
+// STMIA R0, {R1, R2, R3}  — 0xE880000E
+// Encoding check: cond=AL, bits[27:25]=100, P=0, U=1, S=0, W=0, L=0,
+// Rn=0, reg_list=0x000E. This is the commit-5 base case: simplest STM
+// form with no writeback, no S-bit, no Rn-in-list, no R15 — three GPRs
+// walked low→high from the base address.
+static void test_stm_ia_base_case() {
     NDS nds;
 
-    nds.cpu7().state().r[0] = 0x0380'0300u;
-    nds.cpu7().state().r[1] = 0x1234'5678u;
+    // Base address lives in ARM7 WRAM (same region every other arm7
+    // test uses). Pick a distinct page from kBase (where the instruction
+    // word lives) to keep memory reads/writes non-overlapping.
+    constexpr u32 kStmBase = 0x0380'0200u;
+    nds.cpu7().state().r[0] = kStmBase;
+    nds.cpu7().state().r[1] = 0x1111'1111u;
+    nds.cpu7().state().r[2] = 0x2222'2222u;
+    nds.cpu7().state().r[3] = 0x3333'3333u;
 
     const RegSnapshot before = snapshot_regs(nds.cpu7().state());
     const u64 cycles_before = nds.cpu7().state().cycles;
 
-    run_one(nds, kBase, 0xE8A0'0002u);
+    run_one(nds, kBase, 0xE880'000Eu);
 
+    // Three words stored sequentially starting at kStmBase, low→high.
+    REQUIRE(nds.arm7_bus().read32(kStmBase + 0u) == 0x1111'1111u);
+    REQUIRE(nds.arm7_bus().read32(kStmBase + 4u) == 0x2222'2222u);
+    REQUIRE(nds.arm7_bus().read32(kStmBase + 8u) == 0x3333'3333u);
+
+    // W=0, so R0 (the base) is unchanged. R1..R3 are source registers
+    // and stores don't modify them either. Everything else untouched.
+    require_regs_unchanged(before, nds.cpu7().state());
+
+    // Standard pipeline bookkeeping: PC advanced by 4, one ARM7 cycle.
     REQUIRE(nds.cpu7().state().pc == kBase + 4u);
     REQUIRE(nds.cpu7().state().cycles == cycles_before + 1u);
-    require_regs_unchanged(before, nds.cpu7().state());
 }
 
 // Direct-call tests for the addressing-mode normalization helpers in
@@ -241,9 +257,9 @@ static void test_block_addressing_helpers() {
 
 int main() {
     test_dispatch_block_stub_ldmia_does_not_crash();
-    test_dispatch_block_stub_stmia_does_not_crash();
+    test_stm_ia_base_case();
     test_block_addressing_helpers();
 
-    std::puts("arm7_block_test: dispatch_block stub wiring verified");
+    std::puts("arm7_block_test: STM IA base case + helpers verified");
     return 0;
 }
