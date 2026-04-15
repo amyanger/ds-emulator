@@ -83,17 +83,20 @@ BlockAddressing compute_block_addressing(u32 rn_value, u32 reg_list, bool p_bit,
 
 } // namespace arm7_block_detail
 
-u32 dispatch_block(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
+u32 execute_block_transfer(Arm7State& state,
+                           Arm7Bus& bus,
+                           u32 instr,
+                           u32 rn,
+                           u32 reg_list,
+                           bool p_bit,
+                           bool u_bit,
+                           bool s_bit,
+                           bool w_bit,
+                           bool l_bit,
+                           u32 instr_addr) {
     // TODO(cycles): LDM/STM have variable cycle counts (nS+1N+1I /
     // (n-1)S+2N). Returning 1 as a placeholder until the cycle-accuracy
     // slice.
-    const bool p_bit = ((instr >> 24) & 1u) != 0;
-    const bool u_bit = ((instr >> 23) & 1u) != 0;
-    const bool s_bit = ((instr >> 22) & 1u) != 0;
-    const bool w_bit = ((instr >> 21) & 1u) != 0;
-    const bool l_bit = ((instr >> 20) & 1u) != 0;
-    const u32 rn = (instr >> 16) & 0xFu;
-    const u32 reg_list = instr & 0xFFFFu;
 
     // Empty register list (spec §5.8). Real ARMv4 hardware treats
     // this as "transfer R15 only with Rb +/- 0x40 writeback" because
@@ -288,6 +291,18 @@ u32 dispatch_block(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
         state.r[rn] = addressing.wb_value;
     }
     return 1;
+}
+
+u32 dispatch_block(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
+    const bool p_bit = ((instr >> 24) & 1u) != 0;
+    const bool u_bit = ((instr >> 23) & 1u) != 0;
+    const bool s_bit = ((instr >> 22) & 1u) != 0;
+    const bool w_bit = ((instr >> 21) & 1u) != 0;
+    const bool l_bit = ((instr >> 20) & 1u) != 0;
+    const u32 rn = (instr >> 16) & 0xFu;
+    const u32 reg_list = instr & 0xFFFFu;
+    return execute_block_transfer(
+        state, bus, instr, rn, reg_list, p_bit, u_bit, s_bit, w_bit, l_bit, instr_addr);
 }
 
 } // namespace ds

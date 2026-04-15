@@ -139,4 +139,25 @@ enum class HalfwordTransferKind : u8 {
 u32 execute_halfword_transfer_core(
     Arm7State& state, Arm7Bus& bus, u32 address, u32 rd, HalfwordTransferKind kind, u32 instr_addr);
 
+// Shared ARMv4T LDM/STM executor. Caller pre-decodes the P/U/S/W/L
+// bits and the rn/reg_list fields from wherever they come from (ARM
+// instruction word or Thumb PUSH/POP/LDMIA/STMIA encoding). The `instr`
+// parameter is passed through only for diagnostic warn payloads — ARM
+// callers forward the real 32-bit word; Thumb callers synthesize a
+// placeholder. The core handles every slice-3b4 rule: empty-list
+// no-op, STM Rn-in-list early writeback, S=1 user-bank transfer, LDM
+// exception return, deferred R15 commit, writeback suppression for
+// LDM Rn-in-list, and the STM R15 reads-as-instr_addr+12 pipeline quirk.
+u32 execute_block_transfer(Arm7State& state,
+                           Arm7Bus& bus,
+                           u32 instr,
+                           u32 rn,
+                           u32 reg_list,
+                           bool p_bit,
+                           bool u_bit,
+                           bool s_bit,
+                           bool w_bit,
+                           bool l_bit,
+                           u32 instr_addr);
+
 } // namespace ds
