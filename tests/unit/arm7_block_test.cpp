@@ -2,12 +2,12 @@
 // Grown incrementally across slice 3b4: commit 3 proved the warn-stub
 // dispatch wiring, commit 4 verified the addressing-mode helpers in
 // isolation, commit 5 promoted the STMIA scaffold test into the first
-// real-execution test (simplest STM IA base case), and commit 6 adds
-// the mirror LDM IA base case: W=0, S=0, P=0, U=1, Rn not in list,
-// R15 not in list, non-empty list. The old LDMIA "does not crash"
-// scaffold test is retired here — the dispatcher now actually loads
-// registers, so the scaffold's "no register changes" assertion would
-// no longer hold.
+// real-execution test (simplest STM IA base case), commit 6 added the
+// mirror LDM IA base case: W=0, S=0, P=0, U=1, Rn not in list, R15
+// not in list, non-empty list, and commit 7 adds the writeback (W=1)
+// variants of both IA base cases — Rn is updated to wb_value = Rn +
+// 4*n after the transfer. The Rn-in-list writeback rules from spec
+// §5.5 are still gated out and covered in commits 9/10.
 
 #include "bus/arm7_bus.hpp"
 #include "cpu/arm7/arm7.hpp"
@@ -139,6 +139,91 @@ static void test_stm_ia_base_case() {
     // W=0, so R0 (the base) is unchanged. R1..R3 are source registers
     // and stores don't modify them either. Everything else untouched.
     require_regs_unchanged(before, nds.cpu7().state());
+
+    // Standard pipeline bookkeeping: PC advanced by 4, one ARM7 cycle.
+    REQUIRE(nds.cpu7().state().pc == kBase + 4u);
+    REQUIRE(nds.cpu7().state().cycles == cycles_before + 1u);
+}
+
+// STMIA R0!, {R1, R2, R3}  — 0xE8A0000E
+// Encoding check: cond=AL, bits[27:25]=100, P=0, U=1, S=0, W=1, L=0,
+// Rn=0, reg_list=0x000E. Commit 7 adds writeback on top of the commit-5
+// STM IA base case. Rn is not in the list so §5.5's Rn-in-list rules
+// don't apply; the helper's wb_value = Rn + 4*n is written unconditionally.
+static void test_stm_ia_writeback() {
+    NDS nds;
+
+    constexpr u32 kStmBase = 0x0380'0200u;
+    nds.cpu7().state().r[0] = kStmBase;
+    nds.cpu7().state().r[1] = 0x1111'1111u;
+    nds.cpu7().state().r[2] = 0x2222'2222u;
+    nds.cpu7().state().r[3] = 0x3333'3333u;
+
+    const u64 cycles_before = nds.cpu7().state().cycles;
+
+    run_one(nds, kBase, 0xE8A0'000Eu);
+
+    // Same three-word store as the W=0 case: walked low→high from the
+    // pre-writeback base address.
+    REQUIRE(nds.arm7_bus().read32(kStmBase + 0u) == 0x1111'1111u);
+    REQUIRE(nds.arm7_bus().read32(kStmBase + 4u) == 0x2222'2222u);
+    REQUIRE(nds.arm7_bus().read32(kStmBase + 8u) == 0x3333'3333u);
+
+    // Writeback: Rn = pre-value + 4*3 = kStmBase + 0xC.
+    REQUIRE(nds.cpu7().state().r[0] == kStmBase + 0x0Cu);
+
+    // Source registers (R1..R3) untouched by the store; higher GPRs
+    // untouched as well. We don't use require_regs_unchanged here
+    // because R0 intentionally changed.
+    REQUIRE(nds.cpu7().state().r[1] == 0x1111'1111u);
+    REQUIRE(nds.cpu7().state().r[2] == 0x2222'2222u);
+    REQUIRE(nds.cpu7().state().r[3] == 0x3333'3333u);
+
+    // Standard pipeline bookkeeping: PC advanced by 4, one ARM7 cycle.
+    REQUIRE(nds.cpu7().state().pc == kBase + 4u);
+    REQUIRE(nds.cpu7().state().cycles == cycles_before + 1u);
+}
+
+// LDMIA R0!, {R1, R2, R3}  — 0xE8B0000E
+// Encoding check: cond=AL, bits[27:25]=100, P=0, U=1, S=0, W=1, L=1,
+// Rn=0, reg_list=0x000E. Commit 7 adds writeback on top of the commit-6
+// LDM IA base case. Rn is not in the list, so even though ARMv4 loads
+// the new Rn value on the same cycle as the list, the simple rule
+// applies: writeback lands unconditionally at the end.
+static void test_ldm_ia_writeback() {
+    NDS nds;
+
+    constexpr u32 kLdmBase = 0x0380'0200u;
+    nds.arm7_bus().write32(kLdmBase + 0u, 0xAAAA'AAAAu);
+    nds.arm7_bus().write32(kLdmBase + 4u, 0xBBBB'BBBBu);
+    nds.arm7_bus().write32(kLdmBase + 8u, 0xCCCC'CCCCu);
+
+    nds.cpu7().state().r[0] = kLdmBase;
+    nds.cpu7().state().r[1] = 0u;
+    nds.cpu7().state().r[2] = 0u;
+    nds.cpu7().state().r[3] = 0u;
+
+    // Snapshot R4..R14 so we can assert the non-listed GPRs are
+    // untouched. R0..R3 are individually checked below.
+    u32 r_before[11];
+    for (u32 i = 0; i < 11; ++i) {
+        r_before[i] = nds.cpu7().state().r[4 + i];
+    }
+
+    const u64 cycles_before = nds.cpu7().state().cycles;
+
+    run_one(nds, kBase, 0xE8B0'000Eu);
+
+    // Three words loaded sequentially from kLdmBase, low→high.
+    REQUIRE(nds.cpu7().state().r[1] == 0xAAAA'AAAAu);
+    REQUIRE(nds.cpu7().state().r[2] == 0xBBBB'BBBBu);
+    REQUIRE(nds.cpu7().state().r[3] == 0xCCCC'CCCCu);
+
+    // Writeback: Rn = pre-value + 4*3 = kLdmBase + 0xC.
+    REQUIRE(nds.cpu7().state().r[0] == kLdmBase + 0x0Cu);
+    for (u32 i = 0; i < 11; ++i) {
+        REQUIRE(nds.cpu7().state().r[4 + i] == r_before[i]);
+    }
 
     // Standard pipeline bookkeeping: PC advanced by 4, one ARM7 cycle.
     REQUIRE(nds.cpu7().state().pc == kBase + 4u);
@@ -285,8 +370,10 @@ static void test_block_addressing_helpers() {
 int main() {
     test_ldm_ia_base_case();
     test_stm_ia_base_case();
+    test_stm_ia_writeback();
+    test_ldm_ia_writeback();
     test_block_addressing_helpers();
 
-    std::puts("arm7_block_test: LDM/STM IA base cases + helpers verified");
+    std::puts("arm7_block_test: LDM/STM IA base cases + writeback + helpers verified");
     return 0;
 }

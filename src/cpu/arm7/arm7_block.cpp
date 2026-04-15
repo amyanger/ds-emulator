@@ -8,8 +8,12 @@
 // and R15 not in list. Commit 6 generalizes that gate into a single
 // "IA base case" predicate that covers the mirror LDM IA form — same
 // restrictions, same forward-walk addressing, just loads instead of
-// stores. Every other encoding still falls through to the warn stub
-// until its dedicated commit (7–15) enables it.
+// stores. Commit 7 drops the W=0 restriction for the Rn-not-in-list
+// case: when writeback is set, Rn is updated to wb_value after the
+// transfer completes. The Rn-in-list writeback rules from spec §5.5
+// remain gated out until commits 9 (STM) and 10 (LDM). Every other
+// encoding still falls through to the warn stub until its dedicated
+// commit wires it up.
 
 #include "bus/arm7_bus.hpp"
 #include "cpu/arm7/arm7_block_internal.hpp"
@@ -59,13 +63,14 @@ u32 dispatch_block(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
     const u32 rn = (instr >> 16) & 0xFu;
     const u32 reg_list = instr & 0xFFFFu;
 
-    // Commits 5 and 6 together implement the simplest LDM/STM IA base
-    // case: post-increment (P=0), up (U=1), no S-bit, no writeback
-    // (W=0), non-empty list, Rn not in list, R15 not in list. The L bit
-    // selects load vs store; everything else is identical. Any other
-    // path stays on the warn stub until its dedicated follow-up commit
-    // wires it up.
-    const bool is_base_case_ia = !s_bit && !w_bit && !p_bit && u_bit && reg_list != 0u &&
+    // IA base case implemented across commits 5–7: post-increment
+    // (P=0), up (U=1), no S-bit, non-empty list, Rn not in list, R15
+    // not in list. The L bit selects load vs store. W is free now that
+    // commit 7 wires up the (Rn-not-in-list) writeback path; the §5.5
+    // Rn-in-list writeback rules are still out of scope (commits 9 and
+    // 10). Every other encoding stays on the warn stub until its
+    // dedicated follow-up commit wires it up.
+    const bool is_base_case_ia = !s_bit && !p_bit && u_bit && reg_list != 0u &&
                                  ((reg_list & (1u << rn)) == 0u) && ((reg_list & (1u << 15)) == 0u);
 
     if (!is_base_case_ia) {
@@ -75,7 +80,6 @@ u32 dispatch_block(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
 
     const auto addressing =
         arm7_block_detail::compute_block_addressing(state.r[rn], reg_list, p_bit, u_bit);
-    (void) addressing.wb_value; // writeback lands in commit 7
 
     u32 addr = addressing.start_addr;
     if (l_bit) {
@@ -99,6 +103,13 @@ u32 dispatch_block(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
                 addr += 4u;
             }
         }
+    }
+
+    // Writeback (spec §4.4 LDM/STM step 7). Rn-in-list is gated out of
+    // is_base_case_ia, so the simple rule applies unconditionally here:
+    // Rn receives wb_value from the addressing helper.
+    if (w_bit) {
+        state.r[rn] = addressing.wb_value;
     }
     return 1;
 }
