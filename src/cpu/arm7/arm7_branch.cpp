@@ -28,11 +28,11 @@ u32 dispatch_branch(Arm7State& state, u32 instr) {
 }
 
 u32 execute_bx(Arm7State& state, u32 rm_value) {
+    // GBATEK: CPSR.T ← Rn[0]. Unconditional assignment — a Thumb→ARM
+    // BX (Rn[0]==0 from Thumb state) must clear T, not leave it stale.
     const bool thumb = (rm_value & 0x1u) != 0;
     const u32 target = thumb ? (rm_value & ~0x1u) : (rm_value & ~0x3u);
-    if (thumb) {
-        state.cpsr |= (1u << 5);
-    }
+    state.cpsr = (state.cpsr & ~(1u << 5)) | (thumb ? (1u << 5) : 0u);
     write_rd(state, 15, target);
     return 1;
 }
