@@ -1,10 +1,13 @@
 // arm7_block_test.cpp — ARMv4T block data transfer (LDM / STM) tests.
 // Grown incrementally across slice 3b4: commit 3 proved the warn-stub
 // dispatch wiring, commit 4 verified the addressing-mode helpers in
-// isolation, and commit 5 promotes the STMIA scaffold test into the
-// first real-execution test — simplest STM IA base case (W=0, S=0,
-// Rn not in list, R15 not in list). LDMIA is still a warn stub, so
-// its scaffold test stays in place.
+// isolation, commit 5 promoted the STMIA scaffold test into the first
+// real-execution test (simplest STM IA base case), and commit 6 adds
+// the mirror LDM IA base case: W=0, S=0, P=0, U=1, Rn not in list,
+// R15 not in list, non-empty list. The old LDMIA "does not crash"
+// scaffold test is retired here — the dispatcher now actually loads
+// registers, so the scaffold's "no register changes" assertion would
+// no longer hold.
 
 #include "bus/arm7_bus.hpp"
 #include "cpu/arm7/arm7.hpp"
@@ -55,31 +58,55 @@ static void require_regs_unchanged(const RegSnapshot& before, const Arm7State& a
 
 } // namespace
 
-// LDMIA R0, {R1}  — 0xE8900002
+// LDMIA R0, {R1, R2, R3}  — 0xE890000E
 // Encoding check: cond=AL, bits[27:25]=100, P=0, U=1, S=0, W=0, L=1,
-// Rn=0, reg_list=0x0002. This is the simplest LDM form and routes
-// through the primary 0b100 dispatch slot into dispatch_block.
-static void test_dispatch_block_stub_ldmia_does_not_crash() {
+// Rn=0, reg_list=0x000E. Commit 6 base case: simplest LDM form with
+// no writeback, no S-bit, no Rn-in-list, no R15 — three GPRs loaded
+// low→high from the base address. Mirror of the STM IA base case.
+static void test_ldm_ia_base_case() {
     NDS nds;
 
-    // Seed a couple of GPRs so we can prove the stub leaves them alone.
-    nds.cpu7().state().r[0] = 0x0380'0200u;
-    nds.cpu7().state().r[1] = 0xDEAD'BEEFu;
-    nds.cpu7().state().r[2] = 0xCAFE'BABEu;
+    // Base address lives in ARM7 WRAM (same region every other arm7
+    // test uses). Pick a distinct page from kBase (where the instruction
+    // word lives) so the instruction fetch and the LDM reads don't
+    // alias. Seed three distinct sentinel words so we can prove each
+    // register got the right one.
+    constexpr u32 kLdmBase = 0x0380'0200u;
+    nds.arm7_bus().write32(kLdmBase + 0u, 0xAAAA'AAAAu);
+    nds.arm7_bus().write32(kLdmBase + 4u, 0xBBBB'BBBBu);
+    nds.arm7_bus().write32(kLdmBase + 8u, 0xCCCC'CCCCu);
 
-    const RegSnapshot before = snapshot_regs(nds.cpu7().state());
+    nds.cpu7().state().r[0] = kLdmBase;
+    nds.cpu7().state().r[1] = 0u;
+    nds.cpu7().state().r[2] = 0u;
+    nds.cpu7().state().r[3] = 0u;
+
+    // Snapshot R4..R14 so we can assert the non-listed GPRs are
+    // untouched. R0..R3 participate in the transfer (R0 as base, R1-R3
+    // as destinations) so they're checked individually below.
+    u32 r_before[11];
+    for (u32 i = 0; i < 11; ++i) {
+        r_before[i] = nds.cpu7().state().r[4 + i];
+    }
+
     const u64 cycles_before = nds.cpu7().state().cycles;
 
-    run_one(nds, kBase, 0xE890'0002u);
+    run_one(nds, kBase, 0xE890'000Eu);
 
-    // PC advances by 4, cycles consumed == 1 (ARM7 tracks cycles in ARM7
-    // units; run_one advances by one ARM9-cycle pair which nets one ARM7
-    // cycle for a 1-cycle instruction).
+    // Three words loaded sequentially from kLdmBase, low→high.
+    REQUIRE(nds.cpu7().state().r[1] == 0xAAAA'AAAAu);
+    REQUIRE(nds.cpu7().state().r[2] == 0xBBBB'BBBBu);
+    REQUIRE(nds.cpu7().state().r[3] == 0xCCCC'CCCCu);
+
+    // W=0, so R0 (the base) is unchanged. R4..R14 untouched.
+    REQUIRE(nds.cpu7().state().r[0] == kLdmBase);
+    for (u32 i = 0; i < 11; ++i) {
+        REQUIRE(nds.cpu7().state().r[4 + i] == r_before[i]);
+    }
+
+    // Standard pipeline bookkeeping: PC advanced by 4, one ARM7 cycle.
     REQUIRE(nds.cpu7().state().pc == kBase + 4u);
     REQUIRE(nds.cpu7().state().cycles == cycles_before + 1u);
-
-    // No bus traffic, no register changes.
-    require_regs_unchanged(before, nds.cpu7().state());
 }
 
 // STMIA R0, {R1, R2, R3}  — 0xE880000E
@@ -256,10 +283,10 @@ static void test_block_addressing_helpers() {
 }
 
 int main() {
-    test_dispatch_block_stub_ldmia_does_not_crash();
+    test_ldm_ia_base_case();
     test_stm_ia_base_case();
     test_block_addressing_helpers();
 
-    std::puts("arm7_block_test: STM IA base case + helpers verified");
+    std::puts("arm7_block_test: LDM/STM IA base cases + helpers verified");
     return 0;
 }
