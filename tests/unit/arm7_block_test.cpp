@@ -918,6 +918,92 @@ static void test_ldm_s1_r15_exception_return_no_spsr_warn() {
     REQUIRE(s.pc == kBranchTarget);
 }
 
+// Commit 15: empty register list — the warn-and-no-op path. Spec
+// §5.8 deliberately diverges from the GBATEK ARMv4 "transfer R15,
+// Rb ± 0x40" quirk because no compiler ever emits this encoding
+// and real code never depends on it. The contract we commit to:
+//   * state.r[Rn] is unchanged (even with W=1)
+//   * no memory is touched
+//   * no CPSR change
+//   * one cycle, PC advance by 4
+//
+// Encoding: STMIA R0!, {} — 0xE8A0'0000
+//   cond=AL, bits[27:25]=100, P=0, U=1, S=0, W=1, L=0, Rn=0,
+//   reg_list = 0x0000.
+static void test_stm_empty_reg_list_warn_noop() {
+    NDS nds;
+    auto& s = nds.cpu7().state();
+
+    constexpr u32 kStmBase = 0x0380'0200u;
+    constexpr u32 kWatchWord0 = 0xDEAD'BEEFu;
+    constexpr u32 kWatchWord1 = 0xCAFE'BABEu;
+
+    s.r[0] = kStmBase;
+
+    // Seed distinctive watch words around the base so any stray
+    // store is visible.
+    nds.arm7_bus().write32(kStmBase - 4u, kWatchWord0);
+    nds.arm7_bus().write32(kStmBase + 0u, kWatchWord0);
+    nds.arm7_bus().write32(kStmBase + 4u, kWatchWord1);
+    nds.arm7_bus().write32(kStmBase + 8u, kWatchWord1);
+
+    const u32 cpsr_before = s.cpsr;
+    const u64 cycles_before = s.cycles;
+
+    run_one(nds, kBase, 0xE8A0'0000u);
+
+    // Memory strictly unchanged.
+    REQUIRE(nds.arm7_bus().read32(kStmBase - 4u) == kWatchWord0);
+    REQUIRE(nds.arm7_bus().read32(kStmBase + 0u) == kWatchWord0);
+    REQUIRE(nds.arm7_bus().read32(kStmBase + 4u) == kWatchWord1);
+    REQUIRE(nds.arm7_bus().read32(kStmBase + 8u) == kWatchWord1);
+
+    // Rn unchanged despite W=1 — the no-op path skips writeback.
+    REQUIRE(s.r[0] == kStmBase);
+
+    // CPSR untouched, standard pipeline bookkeeping.
+    REQUIRE(s.cpsr == cpsr_before);
+    REQUIRE(s.pc == kBase + 4u);
+    REQUIRE(s.cycles == cycles_before + 1u);
+}
+
+// Commit 15 mirror: LDMIA R0!, {} — 0xE8B0'0000.
+// Same contract as the STM empty test. Seed distinct values in the
+// GPRs and assert nothing was loaded into any of them.
+static void test_ldm_empty_reg_list_warn_noop() {
+    NDS nds;
+    auto& s = nds.cpu7().state();
+
+    constexpr u32 kLdmBase = 0x0380'0200u;
+
+    // Seed memory with a distinctive value that would be impossible
+    // to ignore if a load accidentally happened.
+    nds.arm7_bus().write32(kLdmBase + 0u, 0xDEAD'BEEFu);
+    nds.arm7_bus().write32(kLdmBase + 4u, 0xDEAD'BEEFu);
+
+    // Seed ALL GPRs with known values so we can assert none change.
+    s.r[0] = kLdmBase;
+    for (u32 i = 1; i < 15; ++i) {
+        s.r[i] = 0x1000'0000u + i;
+    }
+
+    const u32 cpsr_before = s.cpsr;
+    const u64 cycles_before = s.cycles;
+
+    run_one(nds, kBase, 0xE8B0'0000u);
+
+    // R0 unchanged despite W=1.
+    REQUIRE(s.r[0] == kLdmBase);
+    // R1..R14 untouched — nothing was loaded.
+    for (u32 i = 1; i < 15; ++i) {
+        REQUIRE(s.r[i] == 0x1000'0000u + i);
+    }
+
+    REQUIRE(s.cpsr == cpsr_before);
+    REQUIRE(s.pc == kBase + 4u);
+    REQUIRE(s.cycles == cycles_before + 1u);
+}
+
 // Direct-call tests for the addressing-mode normalization helpers in
 // arm7_block_internal.hpp. These cover every row of the §5.4 table and
 // the §5.8 empty-list case without standing up an NDS harness. Commit 5
@@ -1071,12 +1157,15 @@ int main() {
     test_ldm_s1_user_bank_from_fiq();
     test_ldm_s1_r15_exception_return();
     test_ldm_s1_r15_exception_return_no_spsr_warn();
+    test_stm_empty_reg_list_warn_noop();
+    test_ldm_empty_reg_list_warn_noop();
     test_block_addressing_helpers();
 
     std::puts("arm7_block_test: LDM/STM IA base cases + {IA,IB,DA,DB} matrix + DB "
               "normalization + STM Rn-in-list old/new base + LDM Rn-in-list "
               "writeback suppression + LDM/STM R15-in-list (S=0) + LDM/STM "
               "S=1 user-bank transfer from FIQ + LDM S=1 R15 exception return "
-              "(IRQ→SVC and System warn path) + helpers verified");
+              "(IRQ→SVC and System warn path) + LDM/STM empty list warn-noop + "
+              "helpers verified");
     return 0;
 }

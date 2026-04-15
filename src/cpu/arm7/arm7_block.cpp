@@ -39,9 +39,13 @@
 // mode has no SPSR (User / System), CPSR is left unchanged with a
 // warn and the branch still happens. The §4.3 normalization in
 // compute_block_addressing means the transfer loop itself is
-// mode-agnostic — only the start_addr and wb_value change. Only
-// the empty-list quirk (commit 15) still falls through to the warn
-// stub.
+// mode-agnostic — only the start_addr and wb_value change. Commit
+// 15 closes out the slice by handling the empty-register-list
+// quirk: real ARMv4 hardware has a strange "transfer R15, writeback
+// Rb±0x40" behavior that no compiler ever emits, and we follow
+// melonDS in logging a deterministic warn and no-op'ing the
+// transfer. With that, every LDM/STM encoding reachable by real
+// code is implemented.
 
 #include "bus/arm7_bus.hpp"
 #include "cpu/arm7/arm7_block_internal.hpp"
@@ -91,20 +95,24 @@ u32 dispatch_block(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
     const u32 rn = (instr >> 16) & 0xFu;
     const u32 reg_list = instr & 0xFFFFu;
 
-    // Supported today: all four addressing modes (any {P, U}), free W,
-    // non-empty list, Rn in list (both families), R15 in list (both
-    // families), and every S-bit form — user-bank transfer for S=1
-    // without R15 (commit 13) and the exception-return form for LDM
-    // S=1 with R15 (commit 14). Only the empty-list quirk still falls
-    // through to the warn stub.
-    const bool rn_in_list = (reg_list & (1u << rn)) != 0u;
-    const bool r15_in_list = (reg_list & (1u << 15)) != 0u;
-    const bool is_supported = reg_list != 0u;
-
-    if (!is_supported) {
-        DS_LOG_WARN("arm7: LDM/STM path not yet implemented 0x%08X at 0x%08X", instr, instr_addr);
+    // Empty register list (spec §5.8). Real ARMv4 hardware treats
+    // this as "transfer R15 only with Rb +/- 0x40 writeback" because
+    // the internal 16-counter decodes zero as "16 words" with an
+    // early exit. melonDS and this emulator deliberately diverge
+    // from the hardware quirk: compilers never emit this encoding,
+    // real code never depends on it, and modeling it would add a
+    // narrow special case to every downstream branch. Instead we
+    // log a deterministic warn and no-op the transfer. Matches
+    // melonDS; flagged in §4.7 of the slice spec as known tech debt
+    // a future GBATEK-accuracy pass may want to revisit.
+    if (reg_list == 0u) {
+        DS_LOG_WARN(
+            "arm7: LDM/STM with empty register list (no-op) 0x%08X at 0x%08X", instr, instr_addr);
         return 1;
     }
+
+    const bool rn_in_list = (reg_list & (1u << rn)) != 0u;
+    const bool r15_in_list = (reg_list & (1u << 15)) != 0u;
 
     const auto addressing =
         arm7_block_detail::compute_block_addressing(state.r[rn], reg_list, p_bit, u_bit);
