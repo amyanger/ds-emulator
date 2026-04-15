@@ -688,6 +688,135 @@ static void test_stm_r15_in_list() {
     REQUIRE(nds.cpu7().state().cycles == cycles_before + 1u);
 }
 
+// Commit 13: STM with S=1 (no R15) from FIQ mode — the user-bank
+// copies of R8/R13/R14 must be stored to memory, not the FIQ copies.
+// Spec §5.6 case 1: S=1 STM always refers to the user-bank register
+// list regardless of current mode. Implementation runs the transfer
+// loop between a pair of switch_mode calls, so the loop reads
+// `state.r[8/13/14]` with the User bank loaded.
+//
+// Encoding: STM R0, {R8, R13, R14}^   (the `^` is the S-bit)
+//   cond=AL, bits[27:25]=100, P=0, U=1, S=1, W=0, L=0,
+//   Rn=0 (R0 is non-banked — intentional), reg_list = 0x6100
+//   → 0xE8C0'6100.
+static void test_stm_s1_user_bank_from_fiq() {
+    NDS nds;
+    auto& s = nds.cpu7().state();
+
+    constexpr u32 kStmBase = 0x0380'0200u;
+    constexpr u32 kUserR8 = 0xAA11'1111u;
+    constexpr u32 kUserR13 = 0xAA22'2222u;
+    constexpr u32 kUserR14 = 0xAA33'3333u;
+    constexpr u32 kFiqR8 = 0xFF11'1111u;
+    constexpr u32 kFiqR13 = 0xFF22'2222u;
+    constexpr u32 kFiqR14 = 0xFF33'3333u;
+
+    // Seed the user bank via User mode.
+    s.switch_mode(Mode::User);
+    s.r[8] = kUserR8;
+    s.r[13] = kUserR13;
+    s.r[14] = kUserR14;
+    s.r[0] = kStmBase; // R0 is not banked; set here so it carries over
+
+    // Switch to FIQ and seed distinct FIQ-bank values. FIQ banks
+    // R8..R14, so these writes hit the FIQ bank only.
+    s.switch_mode(Mode::Fiq);
+    s.r[8] = kFiqR8;
+    s.r[13] = kFiqR13;
+    s.r[14] = kFiqR14;
+
+    nds.arm7_bus().write32(kStmBase + 0u, 0u);
+    nds.arm7_bus().write32(kStmBase + 4u, 0u);
+    nds.arm7_bus().write32(kStmBase + 8u, 0u);
+
+    const u64 cycles_before = s.cycles;
+
+    run_one(nds, kBase, 0xE8C0'6100u);
+
+    // Memory holds the USER-bank values, proving the transfer loop
+    // ran against the swapped-in User bank rather than FIQ's.
+    REQUIRE(nds.arm7_bus().read32(kStmBase + 0u) == kUserR8);
+    REQUIRE(nds.arm7_bus().read32(kStmBase + 4u) == kUserR13);
+    REQUIRE(nds.arm7_bus().read32(kStmBase + 8u) == kUserR14);
+
+    // After the instruction we are back in FIQ mode with FIQ's
+    // R8/R13/R14 intact. The swap-back saves User's (untouched)
+    // bank copy and restores FIQ's.
+    REQUIRE(s.current_mode() == Mode::Fiq);
+    REQUIRE(s.r[8] == kFiqR8);
+    REQUIRE(s.r[13] == kFiqR13);
+    REQUIRE(s.r[14] == kFiqR14);
+
+    // Rn (R0, not banked) is unchanged because W=0.
+    REQUIRE(s.r[0] == kStmBase);
+    REQUIRE(s.pc == kBase + 4u);
+    REQUIRE(s.cycles == cycles_before + 1u);
+}
+
+// Commit 13: LDM with S=1 (no R15) from FIQ mode — the loaded
+// values must land in the USER-bank R8/R13/R14, not FIQ's. The
+// FIQ-bank copies are untouched across the instruction.
+//
+// Encoding: LDM R0, {R8, R13, R14}^
+//   cond=AL, bits[27:25]=100, P=0, U=1, S=1, W=0, L=1,
+//   Rn=0, reg_list = 0x6100 → 0xE8D0'6100.
+static void test_ldm_s1_user_bank_from_fiq() {
+    NDS nds;
+    auto& s = nds.cpu7().state();
+
+    constexpr u32 kLdmBase = 0x0380'0200u;
+    constexpr u32 kLoadedR8 = 0x5500'0088u;
+    constexpr u32 kLoadedR13 = 0x5500'0013u;
+    constexpr u32 kLoadedR14 = 0x5500'0014u;
+    constexpr u32 kFiqR8 = 0xFF11'1111u;
+    constexpr u32 kFiqR13 = 0xFF22'2222u;
+    constexpr u32 kFiqR14 = 0xFF33'3333u;
+
+    nds.arm7_bus().write32(kLdmBase + 0u, kLoadedR8);
+    nds.arm7_bus().write32(kLdmBase + 4u, kLoadedR13);
+    nds.arm7_bus().write32(kLdmBase + 8u, kLoadedR14);
+
+    // Start in User so r[0] carries over; zero user R8/13/14 so the
+    // load is clearly visible afterwards.
+    s.switch_mode(Mode::User);
+    s.r[0] = kLdmBase;
+    s.r[8] = 0u;
+    s.r[13] = 0u;
+    s.r[14] = 0u;
+
+    s.switch_mode(Mode::Fiq);
+    s.r[8] = kFiqR8;
+    s.r[13] = kFiqR13;
+    s.r[14] = kFiqR14;
+
+    const u64 cycles_before = s.cycles;
+
+    run_one(nds, kBase, 0xE8D0'6100u);
+
+    // After the instruction we are still in FIQ mode. The visible
+    // FIQ R8/R13/R14 must be untouched — the loads landed in the
+    // User bank.
+    REQUIRE(s.current_mode() == Mode::Fiq);
+    REQUIRE(s.r[8] == kFiqR8);
+    REQUIRE(s.r[13] == kFiqR13);
+    REQUIRE(s.r[14] == kFiqR14);
+
+    // Now switch to User and assert the loads landed there.
+    s.switch_mode(Mode::User);
+    REQUIRE(s.r[8] == kLoadedR8);
+    REQUIRE(s.r[13] == kLoadedR13);
+    REQUIRE(s.r[14] == kLoadedR14);
+
+    // R0 (non-banked) is unchanged because W=0.
+    REQUIRE(s.r[0] == kLdmBase);
+
+    // The cycle and pc checks predate the post-test switch_mode.
+    REQUIRE(s.cycles == cycles_before + 1u);
+    // state.pc was last touched by step_arm / dispatch — switch_mode
+    // does not modify it, so the kBase + 4 invariant still holds.
+    REQUIRE(s.pc == kBase + 4u);
+}
+
 // Direct-call tests for the addressing-mode normalization helpers in
 // arm7_block_internal.hpp. These cover every row of the §5.4 table and
 // the §5.8 empty-list case without standing up an NDS harness. Commit 5
@@ -837,10 +966,13 @@ int main() {
     test_ldm_rn_in_list_suppresses_writeback();
     test_ldm_r15_in_list_s0();
     test_stm_r15_in_list();
+    test_stm_s1_user_bank_from_fiq();
+    test_ldm_s1_user_bank_from_fiq();
     test_block_addressing_helpers();
 
     std::puts("arm7_block_test: LDM/STM IA base cases + {IA,IB,DA,DB} matrix + DB "
               "normalization + STM Rn-in-list old/new base + LDM Rn-in-list "
-              "writeback suppression + LDM/STM R15-in-list (S=0) + helpers verified");
+              "writeback suppression + LDM/STM R15-in-list (S=0) + LDM/STM "
+              "S=1 user-bank transfer from FIQ + helpers verified");
     return 0;
 }

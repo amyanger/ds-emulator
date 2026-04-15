@@ -27,11 +27,18 @@
 // Commit 12 adds the mirror STM form: when R15 is in the list, the
 // stored word is `instr_addr + 12` rather than `state.r[15]` (which
 // step_arm already advanced to `instr_addr + 8`), matching the ARM7
-// TRM PC-ahead-by-12 convention for STM. The §4.3 normalization in
+// TRM PC-ahead-by-12 convention for STM. Commit 13 adds S=1 without
+// R15 in the list: the transfer loop runs against the User bank via
+// switch_mode(User), with a matching switch_mode(original_mode) once
+// the loop completes. The base address is computed BEFORE the swap
+// so Rn is read in the current mode, and the end-of-instruction
+// writeback lands back in the current mode after the swap-back.
+// S=1 + W=1 is UNPREDICTABLE on real hardware — we warn and still
+// perform writeback (melonDS parity). The §4.3 normalization in
 // compute_block_addressing means the transfer loop itself is
 // mode-agnostic — only the start_addr and wb_value change. The
-// remaining constraints (no S-bit, non-empty list) stay in place and
-// are wired up in their dedicated follow-up commits.
+// remaining constraints (LDM S=1 with R15, empty list) stay in
+// place and are wired up in their dedicated follow-up commits.
 
 #include "bus/arm7_bus.hpp"
 #include "cpu/arm7/arm7_block_internal.hpp"
@@ -82,14 +89,15 @@ u32 dispatch_block(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
     const u32 reg_list = instr & 0xFFFFu;
 
     // Supported today: all four addressing modes (any {P, U}), free W,
-    // no S-bit, non-empty list, Rn in list (both families — STM via
-    // §5.5 old/new-base split, LDM via writeback suppression), and
-    // R15 in list (LDM via the deferred word-aligned write below, STM
-    // via the `instr_addr + 12` rule inside the transfer loop). The
-    // S=1 forms and the empty-list quirk still fall through to the
-    // warn stub and land in later slice 3b4 commits.
+    // non-empty list, Rn in list (both families), R15 in list (both
+    // families), and S=1 without R15 in the list (user-bank transfer,
+    // commit 13). LDM S=1 WITH R15 in the list (the exception-return
+    // form) and the empty-list quirk still fall through to the warn
+    // stub.
     const bool rn_in_list = (reg_list & (1u << rn)) != 0u;
-    const bool is_supported = !s_bit && reg_list != 0u;
+    const bool r15_in_list = (reg_list & (1u << 15)) != 0u;
+    const bool ldm_s_with_r15_unsupported = l_bit && s_bit && r15_in_list;
+    const bool is_supported = reg_list != 0u && !ldm_s_with_r15_unsupported;
 
     if (!is_supported) {
         DS_LOG_WARN("arm7: LDM/STM path not yet implemented 0x%08X at 0x%08X", instr, instr_addr);
@@ -120,6 +128,31 @@ u32 dispatch_block(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
             state.r[rn] = addressing.wb_value;
             stm_writeback_early = true;
         }
+    }
+
+    // S=1 user-bank transfer (spec §5.6 cases 1 and 2, commit 13).
+    // When S=1 and we are NOT in the LDM-R15 exception-return form
+    // (that is commit 14's scope and is gated out above), every
+    // listed register read/written during the transfer loop refers
+    // to the user-bank copy. We implement this by swapping to User
+    // mode around the loop via switch_mode, which saves the current
+    // mode's R8..R14 into its bank and loads the User bank into r[].
+    // The base address was computed above from the CURRENT mode's
+    // Rn (pre-swap), which is correct per spec §4.4 step 2.
+    //
+    // S=1 + W=1 is UNPREDICTABLE on real hardware. We warn and still
+    // perform the end-of-instruction writeback (matches melonDS and
+    // keeps the path deterministic). Real code does not use this
+    // encoding.
+    const bool s_user_bank_transfer = s_bit;
+    const Mode original_mode = state.current_mode();
+    if (s_user_bank_transfer) {
+        if (w_bit) {
+            DS_LOG_WARN("arm7: LDM/STM with S=1 and W=1 is UNPREDICTABLE 0x%08X at 0x%08X",
+                        instr,
+                        instr_addr);
+        }
+        state.switch_mode(Mode::User);
     }
 
     u32 addr = addressing.start_addr;
@@ -168,6 +201,16 @@ u32 dispatch_block(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
                 addr += 4u;
             }
         }
+    }
+
+    // Swap back to the original mode before the R15 write and the
+    // end-of-instruction writeback. Spec §4.4 step 5 / §5.6: the
+    // user-bank transfer is strictly scoped to the transfer loop;
+    // Rn writeback and the R15 commit (for the LDM S=0 form that
+    // lives in commit 11) happen in the caller's original mode so
+    // any banked Rn is the current-mode register, not User.
+    if (s_user_bank_transfer) {
+        state.switch_mode(original_mode);
     }
 
     // R15 write for LDM with R15 in the list (spec §4.4 LDM step 6,
