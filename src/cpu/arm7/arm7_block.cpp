@@ -18,12 +18,17 @@
 // naturally picks up the new base. Commit 10 adds the mirror LDM
 // Rn-in-list rule: on ARMv4, writeback is suppressed entirely when Rn
 // is set in the list, because the loaded value lands in state.r[Rn]
-// during the transfer loop and wins over wb_value. The §4.3
-// normalization in compute_block_addressing means the transfer loop
-// itself is mode-agnostic — only the start_addr and wb_value change.
-// The remaining constraints (no S-bit, non-empty list, R15 not in
-// list) stay in place and are wired up in their dedicated follow-up
-// commits.
+// during the transfer loop and wins over wb_value. Commit 11 adds
+// LDM with R15 in the list (S=0 form): the transfer loop captures the
+// loaded word into a deferred `loaded_pc` slot instead of writing
+// state.r[15] directly, and after the loop the word-aligned target
+// is committed via `write_rd`. CPSR.T is never modified — that is an
+// ARMv5 interworking behavior and is explicitly out of scope here.
+// The §4.3 normalization in compute_block_addressing means the
+// transfer loop itself is mode-agnostic — only the start_addr and
+// wb_value change. The remaining constraints (no S-bit, non-empty
+// list, STM R15 still gated) stay in place and are wired up in their
+// dedicated follow-up commits.
 
 #include "bus/arm7_bus.hpp"
 #include "cpu/arm7/arm7_block_internal.hpp"
@@ -74,14 +79,17 @@ u32 dispatch_block(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
     const u32 reg_list = instr & 0xFFFFu;
 
     // Supported today: all four addressing modes (any {P, U}), free W,
-    // no S-bit, non-empty list, R15 not in list, and both families
-    // tolerate Rn in the register list (STM via the §5.5 old/new-base
-    // split below, LDM via end-of-instruction writeback suppression).
-    // S-bit forms, R15-in-list, and the empty-list quirk still fall
-    // through to the warn stub and land in later slice 3b4 commits.
+    // no S-bit, non-empty list, Rn in list (both families — STM via
+    // §5.5 old/new-base split, LDM via writeback suppression). LDM
+    // with R15 in the list is handled via the deferred-R15 path below
+    // (ARMv4 word-align, leave CPSR.T alone). STM with R15 in the
+    // list still falls through to the warn stub (commit 12), as do
+    // the S=1 forms (commits 13/14) and the empty-list quirk
+    // (commit 15).
     const bool rn_in_list = (reg_list & (1u << rn)) != 0u;
     const bool r15_in_list = (reg_list & (1u << 15)) != 0u;
-    const bool is_supported = !s_bit && reg_list != 0u && !r15_in_list;
+    const bool stm_r15_in_list_unsupported = !l_bit && r15_in_list;
+    const bool is_supported = !s_bit && reg_list != 0u && !stm_r15_in_list_unsupported;
 
     if (!is_supported) {
         DS_LOG_WARN("arm7: LDM/STM path not yet implemented 0x%08X at 0x%08X", instr, instr_addr);
@@ -115,6 +123,8 @@ u32 dispatch_block(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
     }
 
     u32 addr = addressing.start_addr;
+    u32 loaded_pc = 0u;
+    bool r15_loaded = false;
     if (l_bit) {
         // LDM — load each listed register from [start_addr + 4*k]. Per
         // GBATEK / spec §4.4 LDM step 4 the effective address is
@@ -122,9 +132,21 @@ u32 dispatch_block(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
         // (LDM differs from LDR here). The walk is always low-register-
         // to-low-address; §4.3 normalized the decreasing modes to this
         // same forward scan before the loop starts.
+        //
+        // R15 is NOT written directly inside the loop: the loaded word
+        // is captured in loaded_pc and committed below, after any
+        // SPSR restore the S=1 exception-return form will eventually
+        // need (commit 14). Deferring here keeps the S=0 and S=1 paths
+        // sharing the same transfer engine.
         for (u32 i = 0; i < 16; ++i) {
             if ((reg_list & (1u << i)) != 0u) {
-                state.r[i] = bus.read32(addr & ~0x3u);
+                const u32 loaded = bus.read32(addr & ~0x3u);
+                if (i == 15) {
+                    loaded_pc = loaded;
+                    r15_loaded = true;
+                } else {
+                    state.r[i] = loaded;
+                }
                 addr += 4u;
             }
         }
@@ -140,6 +162,19 @@ u32 dispatch_block(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
                 addr += 4u;
             }
         }
+    }
+
+    // R15 write for LDM with R15 in the list (spec §4.4 LDM step 6,
+    // §5.7). ARMv4: word-align the loaded value and write it into
+    // both state.r[15] and state.pc; CPSR.T is NEVER touched by LDM
+    // on ARMv4 (that's an ARMv5-only interworking behavior). The
+    // S=1 exception-return form — which would restore CPSR from
+    // SPSR around this write — is still gated to the warn stub in
+    // this commit (commit 14). `write_rd` stores the given value
+    // in r[15] and always masks pc, so passing the pre-aligned
+    // value puts the same bits in both fields.
+    if (r15_loaded) {
+        write_rd(state, 15, loaded_pc & ~0x3u);
     }
 
     // Writeback (spec §4.4 LDM/STM step 7). Two suppression paths:

@@ -582,6 +582,68 @@ static void test_ldm_rn_in_list_suppresses_writeback() {
     REQUIRE(nds.cpu7().state().cycles == cycles_before + 1u);
 }
 
+// Commit 11: LDM with R15 in the register list, S=0. ARMv4 rule
+// (§5.7 and §4.4 LDM step 6): the loaded word is word-aligned
+// (`& ~0x3u`) and written to both state.r[15] and state.pc. CPSR.T
+// is NEVER modified by LDM on ARMv4 — that is an ARMv5 interworking
+// behavior and is explicitly out of scope.
+//
+// Encoding: LDMIA R0, {R1, PC}
+//   cond=AL, bits[27:25]=100, P=0, U=1, S=0, W=0, L=1,
+//   Rn=0, reg_list = 0x8002 → 0xE890'8002.
+//
+// Memory layout:
+//   [kLdmBase + 0] = 0xBBBB'BBBBu      — destined for R1
+//   [kLdmBase + 4] = kBranchTargetRaw  — destined for PC (see below)
+//
+// Post-instruction expectations:
+//   R1        == 0xBBBB'BBBB
+//   R15       == kBranchTargetAligned (the `& ~0x3` of the loaded word)
+//   state.pc  == kBranchTargetAligned
+//   CPSR      unchanged from the initial 0xD3 (System mode, F+I, ARM)
+static void test_ldm_r15_in_list_s0() {
+    NDS nds;
+
+    constexpr u32 kLdmBase = 0x0380'0200u;
+    // Deliberately pick an unaligned low bit on the loaded PC value to
+    // prove the word-align mask (& ~0x3u) is applied. ARMv5 would
+    // interpret bit 0 as "switch to Thumb"; ARMv4 must silently drop
+    // the bit and keep CPSR.T clear.
+    constexpr u32 kBranchTargetRaw = 0x0380'1003u;
+    constexpr u32 kBranchTargetAligned = 0x0380'1000u;
+
+    nds.arm7_bus().write32(kLdmBase + 0u, 0xBBBB'BBBBu);
+    nds.arm7_bus().write32(kLdmBase + 4u, kBranchTargetRaw);
+
+    nds.cpu7().state().r[0] = kLdmBase;
+    nds.cpu7().state().r[1] = 0u;
+
+    // Capture CPSR before — the ARMv4 rule says LDM must not touch
+    // bit 5 (Thumb). Save the full word so we can assert no other
+    // side-effect either.
+    const u32 cpsr_before = nds.cpu7().state().cpsr;
+    const u64 cycles_before = nds.cpu7().state().cycles;
+
+    run_one(nds, kBase, 0xE890'8002u);
+
+    // R1 picked up the first list slot.
+    REQUIRE(nds.cpu7().state().r[1] == 0xBBBB'BBBBu);
+
+    // R15 and state.pc both hold the word-aligned loaded value. The
+    // next fetch will land at kBranchTargetAligned, NOT at kBase + 4
+    // (the normal sequential-next pc).
+    REQUIRE(nds.cpu7().state().r[15] == kBranchTargetAligned);
+    REQUIRE(nds.cpu7().state().pc == kBranchTargetAligned);
+
+    // CPSR is completely unchanged — key ARMv4 invariant. Bit 5
+    // (Thumb) stays clear even though the loaded word had bit 0 set.
+    REQUIRE(nds.cpu7().state().cpsr == cpsr_before);
+
+    // W=0, Rn=R0 not in list, one cycle consumed.
+    REQUIRE(nds.cpu7().state().r[0] == kLdmBase);
+    REQUIRE(nds.cpu7().state().cycles == cycles_before + 1u);
+}
+
 // Direct-call tests for the addressing-mode normalization helpers in
 // arm7_block_internal.hpp. These cover every row of the §5.4 table and
 // the §5.8 empty-list case without standing up an NDS harness. Commit 5
@@ -729,10 +791,11 @@ int main() {
     test_stm_rn_in_list_lowest();
     test_stm_rn_in_list_not_lowest();
     test_ldm_rn_in_list_suppresses_writeback();
+    test_ldm_r15_in_list_s0();
     test_block_addressing_helpers();
 
     std::puts("arm7_block_test: LDM/STM IA base cases + {IA,IB,DA,DB} matrix + DB "
               "normalization + STM Rn-in-list old/new base + LDM Rn-in-list "
-              "writeback suppression + helpers verified");
+              "writeback suppression + LDM R15 (S=0) word-align + helpers verified");
     return 0;
 }
