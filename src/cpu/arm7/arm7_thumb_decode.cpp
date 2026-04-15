@@ -44,9 +44,8 @@ u32 dispatch_thumb_010_space(
     if ((instr & 0xF200u) == 0x5000u) {
         return dispatch_thumb_ldst_reg(state, bus, instr, instr_addr, pc_read, pc_literal);
     }
-    // THUMB.8 — stub until its commit lands.
-    DS_LOG_WARN("arm7/thumb: 010_space stub (THUMB.8) instr=0x%04X at 0x%08X", instr, instr_addr);
-    return 1;
+    // THUMB.8: 0101 xx 1 Ro Rb Rd — halfword/signed reg offset (bit 9 = 1)
+    return dispatch_thumb_ldst_halfword_reg(state, bus, instr, instr_addr, pc_read, pc_literal);
 }
 
 u32 dispatch_thumb_ldst_imm_wb(
@@ -61,9 +60,8 @@ u32 dispatch_thumb_100_space(
         // THUMB.11: 1001 op1 Rd3 imm8 — LDR/STR SP-rel
         return dispatch_thumb_ldst_sp(state, bus, instr, instr_addr, pc_read, pc_literal);
     }
-    // THUMB.10 — stub until its commit lands.
-    DS_LOG_WARN("arm7/thumb: 100_space stub instr=0x%04X at 0x%08X", instr, instr_addr);
-    return 1;
+    // THUMB.10: 1000 op1 imm5 Rb3 Rd3 — STRH/LDRH imm offset
+    return dispatch_thumb_ldst_halfword_imm(state, bus, instr, instr_addr, pc_read, pc_literal);
 }
 
 u32 dispatch_thumb_101_space(

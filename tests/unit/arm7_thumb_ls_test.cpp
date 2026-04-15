@@ -1,6 +1,7 @@
 // arm7_thumb_ls_test.cpp — Thumb load/store format tests.
 // THUMB.6 LDR PC-relative, THUMB.7 LDR/STR reg offset,
-// THUMB.9 LDR/STR imm offset, THUMB.11 LDR/STR SP-relative.
+// THUMB.8 STRH/LDSB/LDRH/LDSH reg offset, THUMB.9 LDR/STR imm offset,
+// THUMB.10 STRH/LDRH imm offset, THUMB.11 LDR/STR SP-relative.
 
 #include "bus/arm7_bus.hpp"
 #include "cpu/arm7/arm7.hpp"
@@ -19,9 +20,19 @@ static u16 thumb7(u32 l, u32 b, u32 ro, u32 rb, u32 rd) {
     return static_cast<u16>((0b0101u << 12) | (l << 11) | (b << 10) | (ro << 6) | (rb << 3) | rd);
 }
 
+// THUMB.8: 0101 op2 1 Ro3 Rb3 Rd3 (op: 0=STRH 1=LDSB 2=LDRH 3=LDSH)
+static u16 thumb8(u32 op, u32 ro, u32 rb, u32 rd) {
+    return static_cast<u16>((0b0101u << 12) | (op << 10) | (1u << 9) | (ro << 6) | (rb << 3) | rd);
+}
+
 // THUMB.9: 011 BL imm5 Rb3 Rd3
 static u16 thumb9(u32 b, u32 l, u32 imm5, u32 rb, u32 rd) {
     return static_cast<u16>((0b011u << 13) | (b << 12) | (l << 11) | (imm5 << 6) | (rb << 3) | rd);
+}
+
+// THUMB.10: 1000 op1 imm5 Rb3 Rd3 (op: 0=STRH 1=LDRH)
+static u16 thumb10(u32 op, u32 imm5, u32 rb, u32 rd) {
+    return static_cast<u16>((0b1000u << 12) | (op << 11) | (imm5 << 6) | (rb << 3) | rd);
 }
 
 // THUMB.11: 1001 L Rd3 imm8
@@ -251,6 +262,175 @@ static void thumb9_ldr_word_zero_offset() {
     REQUIRE(nds.cpu7().state().r[0] == 0xAAAA'BBBBu);
 }
 
+// ==== THUMB.8 — STRH/LDSB/LDRH/LDSH register offset ====
+
+static void thumb8_strh() {
+    // STRH R0, [R1, R2]
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb8(0, 2, 1, 0));
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 0xABCDu;
+    nds.cpu7().state().r[1] = BASE + 0x100;
+    nds.cpu7().state().r[2] = 0x10;
+    step_one(nds);
+    REQUIRE(nds.arm7_bus().read16(BASE + 0x110) == 0xABCDu);
+}
+
+static void thumb8_strh_misaligned() {
+    // STRH to odd address — bit 0 masked before write.
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb8(0, 2, 1, 0));
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 0x1234u;
+    nds.cpu7().state().r[1] = BASE + 0x100;
+    nds.cpu7().state().r[2] = 1; // addr = BASE + 0x101 (odd)
+    step_one(nds);
+    // Write goes to BASE + 0x100 (bit 0 masked)
+    REQUIRE(nds.arm7_bus().read16(BASE + 0x100) == 0x1234u);
+}
+
+static void thumb8_ldrh() {
+    // LDRH R3, [R4, R5]
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb8(2, 5, 4, 3));
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[4] = BASE + 0x200;
+    nds.cpu7().state().r[5] = 0x08;
+    nds.arm7_bus().write16(BASE + 0x208, 0xBEEFu);
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[3] == 0xBEEFu);
+}
+
+static void thumb8_ldrh_misaligned() {
+    // LDRH from odd address — bit 0 masked, halfword zero-extended.
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb8(2, 5, 4, 0));
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[4] = BASE + 0x100;
+    nds.cpu7().state().r[5] = 1; // addr = BASE + 0x101 (odd)
+    nds.arm7_bus().write16(BASE + 0x100, 0xCAFEu);
+    step_one(nds);
+    // Reads from BASE + 0x100 (bit 0 masked), zero-extends.
+    REQUIRE(nds.cpu7().state().r[0] == 0xCAFEu);
+}
+
+static void thumb8_ldsb() {
+    // LDSB R0, [R1, R2] — load signed byte, sign-extend to 32 bits.
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb8(1, 2, 1, 0));
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[1] = BASE + 0x100;
+    nds.cpu7().state().r[2] = 3;
+    nds.arm7_bus().write8(BASE + 0x103, 0x80u); // -128
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'FF80u);
+}
+
+static void thumb8_ldsb_positive() {
+    // LDSB with a positive byte (bit 7 clear).
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb8(1, 2, 1, 0));
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[1] = BASE + 0x100;
+    nds.cpu7().state().r[2] = 0;
+    nds.arm7_bus().write8(BASE + 0x100, 0x7Fu); // +127
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 0x7Fu);
+}
+
+static void thumb8_ldsh() {
+    // LDSH R0, [R1, R2] — load signed halfword, sign-extend to 32 bits.
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb8(3, 2, 1, 0));
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[1] = BASE + 0x100;
+    nds.cpu7().state().r[2] = 0;
+    nds.arm7_bus().write16(BASE + 0x100, 0x8000u); // -32768
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'8000u);
+}
+
+static void thumb8_ldsh_positive() {
+    // LDSH with a positive halfword (bit 15 clear).
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb8(3, 2, 1, 0));
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[1] = BASE + 0x100;
+    nds.cpu7().state().r[2] = 0;
+    nds.arm7_bus().write16(BASE + 0x100, 0x7FFFu);
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 0x7FFFu);
+}
+
+static void thumb8_ldrh_zero_offset() {
+    // LDRH with Ro=0.
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb8(2, 2, 1, 0));
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[1] = BASE + 0x100;
+    nds.cpu7().state().r[2] = 0;
+    nds.arm7_bus().write16(BASE + 0x100, 0xFACEu);
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 0xFACEu);
+}
+
+// ==== THUMB.10 — STRH/LDRH immediate offset ====
+
+static void thumb10_strh() {
+    // STRH R0, [R1, #6] — imm5=3 (offset=3*2=6)
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb10(0, 3, 1, 0));
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 0xDEADu;
+    nds.cpu7().state().r[1] = BASE + 0x100;
+    step_one(nds);
+    REQUIRE(nds.arm7_bus().read16(BASE + 0x106) == 0xDEADu);
+}
+
+static void thumb10_ldrh() {
+    // LDRH R2, [R3, #4] — imm5=2 (offset=2*2=4)
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb10(1, 2, 3, 2));
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[3] = BASE + 0x200;
+    nds.arm7_bus().write16(BASE + 0x204, 0xBEEFu);
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[2] == 0xBEEFu);
+}
+
+static void thumb10_ldrh_zero_offset() {
+    // LDRH with imm5=0 (offset=0).
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb10(1, 0, 1, 0));
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[1] = BASE + 0x100;
+    nds.arm7_bus().write16(BASE + 0x100, 0x1234u);
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 0x1234u);
+}
+
+static void thumb10_ldrh_max_offset() {
+    // LDRH with imm5=31 (offset=31*2=62).
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb10(1, 31, 1, 0));
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[1] = BASE + 0x100;
+    nds.arm7_bus().write16(BASE + 0x13E, 0xAAAAu);
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 0xAAAAu);
+}
+
+static void thumb10_strh_zero_offset() {
+    // STRH with imm5=0 (offset=0).
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb10(0, 0, 1, 0));
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 0x5678u;
+    nds.cpu7().state().r[1] = BASE + 0x100;
+    step_one(nds);
+    REQUIRE(nds.arm7_bus().read16(BASE + 0x100) == 0x5678u);
+}
+
 // ==== THUMB.11 — LDR/STR SP-relative ====
 
 static void thumb11_str_sp_basic() {
@@ -332,6 +512,17 @@ int main() {
     thumb7_ldrb();
     thumb7_ldr_zero_offset();
 
+    // THUMB.8
+    thumb8_strh();
+    thumb8_strh_misaligned();
+    thumb8_ldrh();
+    thumb8_ldrh_misaligned();
+    thumb8_ldsb();
+    thumb8_ldsb_positive();
+    thumb8_ldsh();
+    thumb8_ldsh_positive();
+    thumb8_ldrh_zero_offset();
+
     // THUMB.9
     thumb9_str_word();
     thumb9_ldr_word();
@@ -340,6 +531,13 @@ int main() {
     thumb9_ldrb();
     thumb9_str_word_max_offset();
     thumb9_ldr_word_zero_offset();
+
+    // THUMB.10
+    thumb10_strh();
+    thumb10_ldrh();
+    thumb10_ldrh_zero_offset();
+    thumb10_ldrh_max_offset();
+    thumb10_strh_zero_offset();
 
     // THUMB.11
     thumb11_str_sp_basic();

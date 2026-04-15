@@ -6,8 +6,14 @@
 //
 // THUMB.7: LDR/STR/LDRB/STRB with register offset. Address = Rb + Ro.
 //
+// THUMB.8: STRH/LDSB/LDRH/LDSH with register offset. Address = Rb + Ro.
+//   Delegates to execute_halfword_transfer_core.
+//
 // THUMB.9: LDR/STR/LDRB/STRB with immediate offset. Word offset =
 //   imm5 * 4, byte offset = imm5.
+//
+// THUMB.10: STRH/LDRH with immediate offset. Address = Rb + (imm5 << 1).
+//   Delegates to execute_halfword_transfer_core.
 //
 // THUMB.11: LDR/STR SP-rel. Address = SP + (imm8 << 2). Rotate-on-
 //   misalign applies if SP is misaligned (games shouldn't do this but
@@ -70,6 +76,47 @@ u32 dispatch_thumb_ldr_pc(
     // Address is always word-aligned (pc_literal is word-aligned, offset is *4).
     // Use execute_single_data_transfer_core: is_load=true, is_byte=false.
     return execute_single_data_transfer_core(state, bus, addr, rd, true, false, instr_addr);
+}
+
+// THUMB.8: 0101 op2 1 Ro3 Rb3 Rd3
+// STRH/LDSB/LDRH/LDSH with register offset. Address = Rb + Ro.
+// op (bits 11..10): 0=STRH, 1=LDSB, 2=LDRH, 3=LDSH.
+u32 dispatch_thumb_ldst_halfword_reg(Arm7State& state,
+                                     Arm7Bus& bus,
+                                     u16 instr,
+                                     u32 instr_addr,
+                                     u32 /*pc_read*/,
+                                     u32 /*pc_literal*/) {
+    static constexpr HalfwordTransferKind kind_table[4] = {
+        HalfwordTransferKind::STRH,
+        HalfwordTransferKind::LDSB,
+        HalfwordTransferKind::LDRH,
+        HalfwordTransferKind::LDSH,
+    };
+    const u32 op = (instr >> 10) & 0x3u;
+    const u32 ro = (instr >> 6) & 0x7u;
+    const u32 rb = (instr >> 3) & 0x7u;
+    const u32 rd = instr & 0x7u;
+    const u32 addr = state.r[rb] + state.r[ro];
+    return execute_halfword_transfer_core(state, bus, addr, rd, kind_table[op], instr_addr);
+}
+
+// THUMB.10: 1000 op1 imm5 Rb3 Rd3
+// STRH/LDRH with immediate offset. Address = Rb + (imm5 << 1).
+// op (bit 11): 0=STRH, 1=LDRH.
+u32 dispatch_thumb_ldst_halfword_imm(Arm7State& state,
+                                     Arm7Bus& bus,
+                                     u16 instr,
+                                     u32 instr_addr,
+                                     u32 /*pc_read*/,
+                                     u32 /*pc_literal*/) {
+    const bool is_load = ((instr >> 11) & 1u) != 0;
+    const u32 imm5 = (instr >> 6) & 0x1Fu;
+    const u32 rb = (instr >> 3) & 0x7u;
+    const u32 rd = instr & 0x7u;
+    const u32 addr = state.r[rb] + (imm5 << 1);
+    const auto kind = is_load ? HalfwordTransferKind::LDRH : HalfwordTransferKind::STRH;
+    return execute_halfword_transfer_core(state, bus, addr, rd, kind, instr_addr);
 }
 
 // THUMB.11: 1001 op1 Rd3 imm8
