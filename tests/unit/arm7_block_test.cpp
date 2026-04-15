@@ -534,6 +534,54 @@ static void test_stm_rn_in_list_not_lowest() {
     REQUIRE(nds.cpu7().state().cycles == cycles_before + 1u);
 }
 
+// Commit 10: LDM with Rn in the register list, W=1. ARMv4 rule
+// (§5.5 and GBATEK "Strange Effects on Invalid Rlist's"): writeback
+// is suppressed entirely. The transfer loop writes the loaded word
+// into state.r[Rn], and the end-of-instruction writeback step must
+// leave it alone so wb_value does not clobber the loaded value.
+//
+// Encoding: LDMIA R0!, {R0, R1, R2}
+//   cond=AL, bits[27:25]=100, P=0, U=1, S=0, W=1, L=1,
+//   Rn=0, reg_list = 0x0007 → 0xE8B0'0007.
+//
+// Memory layout:
+//   [kLdmBase + 0] = 0x5A5A'5A5Au   — this becomes the new R0
+//   [kLdmBase + 4] = 0xBBBB'BBBBu   — destined for R1
+//   [kLdmBase + 8] = 0xCCCC'CCCCu   — destined for R2
+//
+// Post-instruction expectations:
+//   R0 == 0x5A5A'5A5A (loaded value, NOT kLdmBase + 12 — writeback
+//                      suppressed per ARMv4 rule).
+//   R1 == 0xBBBB'BBBB
+//   R2 == 0xCCCC'CCCC
+static void test_ldm_rn_in_list_suppresses_writeback() {
+    NDS nds;
+
+    constexpr u32 kLdmBase = 0x0380'0200u;
+    constexpr u32 kLoadedR0 = 0x5A5A'5A5Au;
+
+    nds.arm7_bus().write32(kLdmBase + 0u, kLoadedR0);
+    nds.arm7_bus().write32(kLdmBase + 4u, 0xBBBB'BBBBu);
+    nds.arm7_bus().write32(kLdmBase + 8u, 0xCCCC'CCCCu);
+
+    nds.cpu7().state().r[0] = kLdmBase;
+    nds.cpu7().state().r[1] = 0u;
+    nds.cpu7().state().r[2] = 0u;
+
+    const u64 cycles_before = nds.cpu7().state().cycles;
+
+    run_one(nds, kBase, 0xE8B0'0007u);
+
+    // The loaded value wins: R0 is NOT kLdmBase + 0xC (which would be
+    // the naive writeback result). It is the word at memory[kLdmBase].
+    REQUIRE(nds.cpu7().state().r[0] == kLoadedR0);
+    REQUIRE(nds.cpu7().state().r[1] == 0xBBBB'BBBBu);
+    REQUIRE(nds.cpu7().state().r[2] == 0xCCCC'CCCCu);
+
+    REQUIRE(nds.cpu7().state().pc == kBase + 4u);
+    REQUIRE(nds.cpu7().state().cycles == cycles_before + 1u);
+}
+
 // Direct-call tests for the addressing-mode normalization helpers in
 // arm7_block_internal.hpp. These cover every row of the §5.4 table and
 // the §5.8 empty-list case without standing up an NDS harness. Commit 5
@@ -680,9 +728,11 @@ int main() {
     test_stmdb_normalization_smoke();
     test_stm_rn_in_list_lowest();
     test_stm_rn_in_list_not_lowest();
+    test_ldm_rn_in_list_suppresses_writeback();
     test_block_addressing_helpers();
 
     std::puts("arm7_block_test: LDM/STM IA base cases + {IA,IB,DA,DB} matrix + DB "
-              "normalization + STM Rn-in-list old/new base + helpers verified");
+              "normalization + STM Rn-in-list old/new base + LDM Rn-in-list "
+              "writeback suppression + helpers verified");
     return 0;
 }

@@ -9,18 +9,21 @@
 // base case, commit 7 added writeback (W=1) for the Rn-not-in-list IA
 // path, and commit 8 drops the IA-only restriction so all four
 // addressing modes (IA, IB, DA, DB) execute through the same
-// forward-walk engine. Commit 9 now implements the ARMv4 STM Rn-in-list
+// forward-walk engine. Commit 9 implements the ARMv4 STM Rn-in-list
 // rule (§5.5): when Rn is in the register list, the value stored at
 // the i == Rn slot depends on whether Rn is the lowest-numbered set
 // bit. If it is, the original Rn is stored (writeback, if requested,
 // lands at the end as usual). If it is not, the writeback value is
 // applied BEFORE the transfer loop so the loop's read of `state.r[Rn]`
-// naturally picks up the new base. The §4.3 normalization in
-// compute_block_addressing means the transfer loop itself is
-// mode-agnostic — only the start_addr and wb_value change. The
-// remaining constraints (no S-bit, non-empty list, LDM Rn-in-list,
-// R15 not in list) stay in place and are wired up in their dedicated
-// follow-up commits.
+// naturally picks up the new base. Commit 10 adds the mirror LDM
+// Rn-in-list rule: on ARMv4, writeback is suppressed entirely when Rn
+// is set in the list, because the loaded value lands in state.r[Rn]
+// during the transfer loop and wins over wb_value. The §4.3
+// normalization in compute_block_addressing means the transfer loop
+// itself is mode-agnostic — only the start_addr and wb_value change.
+// The remaining constraints (no S-bit, non-empty list, R15 not in
+// list) stay in place and are wired up in their dedicated follow-up
+// commits.
 
 #include "bus/arm7_bus.hpp"
 #include "cpu/arm7/arm7_block_internal.hpp"
@@ -71,16 +74,14 @@ u32 dispatch_block(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
     const u32 reg_list = instr & 0xFFFFu;
 
     // Supported today: all four addressing modes (any {P, U}), free W,
-    // no S-bit, non-empty list, R15 not in list. STM with Rn in the
-    // list is handled via the §5.5 "old base if lowest, new base
-    // otherwise" rule below. LDM Rn-in-list, S-bit forms, R15-in-list,
-    // and the empty-list quirk still fall through to the warn stub and
-    // land in later slice 3b4 commits.
+    // no S-bit, non-empty list, R15 not in list, and both families
+    // tolerate Rn in the register list (STM via the §5.5 old/new-base
+    // split below, LDM via end-of-instruction writeback suppression).
+    // S-bit forms, R15-in-list, and the empty-list quirk still fall
+    // through to the warn stub and land in later slice 3b4 commits.
     const bool rn_in_list = (reg_list & (1u << rn)) != 0u;
     const bool r15_in_list = (reg_list & (1u << 15)) != 0u;
-    const bool ldm_rn_in_list_unsupported = l_bit && rn_in_list;
-    const bool is_supported =
-        !s_bit && reg_list != 0u && !r15_in_list && !ldm_rn_in_list_unsupported;
+    const bool is_supported = !s_bit && reg_list != 0u && !r15_in_list;
 
     if (!is_supported) {
         DS_LOG_WARN("arm7: LDM/STM path not yet implemented 0x%08X at 0x%08X", instr, instr_addr);
@@ -141,12 +142,16 @@ u32 dispatch_block(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
         }
     }
 
-    // Writeback (spec §4.4 LDM/STM step 7). If the STM Rn-in-list early
-    // path already applied the new base (§5.5, "Rn in list and NOT
-    // lowest"), skip the end-of-instruction writeback so we don't write
-    // wb_value twice. LDM Rn-in-list is gated out above, so no LDM-side
-    // suppression is needed in this commit.
-    if (w_bit && !stm_writeback_early) {
+    // Writeback (spec §4.4 LDM/STM step 7). Two suppression paths:
+    //   1. STM Rn-in-list early path already applied wb_value before
+    //      the loop (§5.5, "Rn in list and NOT lowest") — skip so we
+    //      don't write it twice.
+    //   2. LDM Rn-in-list on ARMv4 (§5.5): the loaded value wins, so
+    //      writeback is suppressed entirely. The transfer loop has
+    //      already written the loaded word into state.r[rn]; running
+    //      the writeback here would clobber it with wb_value.
+    const bool ldm_rn_in_list_suppresses_wb = l_bit && rn_in_list;
+    if (w_bit && !stm_writeback_early && !ldm_rn_in_list_suppresses_wb) {
         state.r[rn] = addressing.wb_value;
     }
     return 1;
