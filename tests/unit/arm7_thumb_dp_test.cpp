@@ -44,6 +44,94 @@ static void step_one(NDS& nds) {
     nds.cpu7().run_until((before + 1) * 2);
 }
 
+// Encode THUMB.2: 00011 I op Rn3/imm3 Rs3 Rd3
+// I=0,op=0: ADD reg  I=0,op=1: SUB reg  I=1,op=0: ADD imm3  I=1,op=1: SUB imm3
+static u16 thumb2(u32 i, u32 op, u32 rn_or_imm, u32 rs, u32 rd) {
+    return static_cast<u16>((0b00011u << 11) | (i << 10) | (op << 9) | (rn_or_imm << 6) |
+                            (rs << 3) | rd);
+}
+
+// ==== THUMB.2 — add/sub ====
+
+static void thumb2_add_reg() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb2(0, 0, 2, 1, 0)); // ADD R0, R1, R2
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[1] = 100;
+    nds.cpu7().state().r[2] = 50;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 150);
+    REQUIRE(!flag_n(nds.cpu7().state().cpsr));
+    REQUIRE(!flag_z(nds.cpu7().state().cpsr));
+    REQUIRE(!flag_c(nds.cpu7().state().cpsr));
+}
+
+static void thumb2_sub_reg() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb2(0, 1, 3, 4, 5)); // SUB R5, R4, R3
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[4] = 200;
+    nds.cpu7().state().r[3] = 50;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[5] == 150);
+    REQUIRE(flag_c(nds.cpu7().state().cpsr)); // no borrow
+}
+
+static void thumb2_add_imm3() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb2(1, 0, 7, 0, 1)); // ADD R1, R0, #7
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 10;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[1] == 17);
+}
+
+static void thumb2_sub_imm3() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb2(1, 1, 3, 6, 7)); // SUB R7, R6, #3
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[6] = 10;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[7] == 7);
+    REQUIRE(flag_c(nds.cpu7().state().cpsr)); // no borrow
+}
+
+static void thumb2_mov_pseudo_updates_all_flags() {
+    // ADD Rd, Rs, #0 is the MOV pseudo. GBATEK: full NZCV even for #0.
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb2(1, 0, 0, 2, 3)); // ADD R3, R2, #0
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[2] = 0;
+    nds.cpu7().state().cpsr |= (1u << 29) | (1u << 28); // C=1, V=1 before
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[3] == 0);
+    REQUIRE(flag_z(nds.cpu7().state().cpsr));
+    REQUIRE(!flag_c(nds.cpu7().state().cpsr)); // 0+0 = no carry
+    REQUIRE(!flag_v(nds.cpu7().state().cpsr)); // 0+0 = no overflow
+}
+
+static void thumb2_sub_underflow() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb2(1, 1, 1, 0, 1)); // SUB R1, R0, #1
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 0;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[1] == 0xFFFF'FFFFu);
+    REQUIRE(flag_n(nds.cpu7().state().cpsr));
+    REQUIRE(!flag_c(nds.cpu7().state().cpsr)); // borrow
+}
+
+static void thumb2_add_signed_overflow() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb2(1, 0, 1, 4, 5)); // ADD R5, R4, #1
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[4] = 0x7FFF'FFFFu;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[5] == 0x8000'0000u);
+    REQUIRE(flag_v(nds.cpu7().state().cpsr));
+    REQUIRE(flag_n(nds.cpu7().state().cpsr));
+}
+
 // ==== THUMB.1 — shift imm ====
 
 static void thumb1_lsl_basic() {
@@ -372,6 +460,15 @@ static void thumb3_sub_max_imm() {
 }
 
 int main() {
+    // THUMB.2
+    thumb2_add_reg();
+    thumb2_sub_reg();
+    thumb2_add_imm3();
+    thumb2_sub_imm3();
+    thumb2_mov_pseudo_updates_all_flags();
+    thumb2_sub_underflow();
+    thumb2_add_signed_overflow();
+
     // THUMB.1
     thumb1_lsl_basic();
     thumb1_lsl_zero_no_shift_c_preserved();

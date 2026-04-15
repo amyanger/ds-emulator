@@ -5,6 +5,9 @@
 //   LSL #0 = no shift, C unchanged; LSR/ASR #0 = shift by 32.
 //   Flags: NZC updated (V unchanged). C unchanged for LSL #0.
 //
+// THUMB.2 (add/sub): ADD/SUB with reg or imm3 operand. Full NZCV
+//   always, even for the ADD Rd,Rs,#0 (MOV pseudo).
+//
 // THUMB.3 (imm8 DP): execute_dp_op with shifter_carry = current_c
 //   so MOV preserves C/V (logical-form path sets NZ + shifter_carry).
 
@@ -25,9 +28,26 @@ u32 dispatch_thumb_shift_or_addsub(Arm7State& state,
     const u32 op = (instr >> 11) & 0x3u;
 
     if (op == 3) {
-        // THUMB.2 add/sub — lands in commit 10.
-        DS_LOG_WARN("arm7/thumb: THUMB.2 add/sub stub instr=0x%04X at 0x%08X", instr, instr_addr);
-        return 1;
+        // THUMB.2: 00011 I op Rn3/imm3 Rs3 Rd3
+        // I (bit 10): 0=register, 1=3-bit immediate
+        // op (bit 9): 0=ADD, 1=SUB
+        const bool i_bit = ((instr >> 10) & 1u) != 0;
+        const bool sub = ((instr >> 9) & 1u) != 0;
+        const u32 rn_or_imm = (instr >> 6) & 0x7u;
+        const u32 rs = (instr >> 3) & 0x7u;
+        const u32 rd = instr & 0x7u;
+
+        const u32 operand2 = i_bit ? rn_or_imm : state.r[rn_or_imm];
+        const bool current_c = (state.cpsr & (1u << 29)) != 0;
+
+        return execute_dp_op(state,
+                             sub ? DpOp::SUB : DpOp::ADD,
+                             state.r[rs],
+                             operand2,
+                             current_c,
+                             true,
+                             rd,
+                             instr_addr);
     }
 
     // THUMB.1: 000 op2 off5 Rs3 Rd3
