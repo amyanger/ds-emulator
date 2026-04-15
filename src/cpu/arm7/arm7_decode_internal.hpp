@@ -121,4 +121,22 @@ u32 dispatch_psr_transfer(Arm7State& state, u32 instr, u32 instr_addr);
 // and Signed Data Transfer".
 u32 dispatch_halfword(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr);
 
+// Kind discriminator for the shared halfword / signed byte transfer
+// executor. ARM encodes this as the SH field; Thumb formats 8 and 10
+// map directly onto the same set.
+enum class HalfwordTransferKind : u8 {
+    LDRH, // load halfword, zero-extend to 32
+    LDSB, // load signed byte, sign-extend to 32
+    LDSH, // load signed halfword, sign-extend to 32
+    STRH, // store halfword (low 16 bits of Rd)
+};
+
+// Shared ARMv4T halfword/signed-byte executor. Caller pre-computes the
+// access address. The core does the bus access (with bit-0 masking on
+// the halfword forms), writes Rd on loads, and reads Rd (with the
+// Rd==R15→instr_addr+12 pipeline quirk) on STRH. Rn base writeback is
+// NOT done here — the caller handles it.
+u32 execute_halfword_transfer_core(
+    Arm7State& state, Arm7Bus& bus, u32 address, u32 rd, HalfwordTransferKind kind, u32 instr_addr);
+
 } // namespace ds
