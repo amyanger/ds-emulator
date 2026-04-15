@@ -644,6 +644,50 @@ static void test_ldm_r15_in_list_s0() {
     REQUIRE(nds.cpu7().state().cycles == cycles_before + 1u);
 }
 
+// Commit 12: STM with R15 in the register list. ARMv4 rule
+// (§5.7): the stored word is `instruction_addr + 12` — NOT
+// `state.r[15]`. The ARM7TDMI step_arm loop has already advanced
+// `state.r[15]` to `instruction_addr + 8` (the PC-ahead-by-8 value
+// the pipeline exposes to the execute stage), so reading r[15]
+// directly would produce an off-by-4 word for STM.
+//
+// Encoding: STMIA R0!, {R1, PC}
+//   cond=AL, bits[27:25]=100, P=0, U=1, S=0, W=1, L=0,
+//   Rn=0, reg_list = 0x8002 → 0xE8A0'8002.
+//
+// The instruction word lives at `kBase`, so the expected stored PC
+// is `kBase + 12`. Seed R15 to a distinct sentinel value to prove
+// the code is NOT reading r[15] — if it were, the stored word would
+// be `kBase + 8` (the step_arm value).
+static void test_stm_r15_in_list() {
+    NDS nds;
+
+    constexpr u32 kStmBase = 0x0380'0200u;
+    nds.cpu7().state().r[0] = kStmBase;
+    nds.cpu7().state().r[1] = 0x1111'1111u;
+
+    nds.arm7_bus().write32(kStmBase + 0u, 0u);
+    nds.arm7_bus().write32(kStmBase + 4u, 0u);
+
+    const u64 cycles_before = nds.cpu7().state().cycles;
+
+    run_one(nds, kBase, 0xE8A0'8002u);
+
+    // R1 at the lowest address, PC at +4. The PC slot holds
+    // kBase + 12 per the ARMv4 STM-R15 rule.
+    REQUIRE(nds.arm7_bus().read32(kStmBase + 0u) == 0x1111'1111u);
+    REQUIRE(nds.arm7_bus().read32(kStmBase + 4u) == kBase + 12u);
+
+    // Writeback: Rn = kStmBase + 4*2. R1 unchanged.
+    REQUIRE(nds.cpu7().state().r[0] == kStmBase + 0x08u);
+    REQUIRE(nds.cpu7().state().r[1] == 0x1111'1111u);
+
+    // Standard pipeline bookkeeping: STM did not branch, PC advanced
+    // to kBase + 4, one ARM7 cycle consumed.
+    REQUIRE(nds.cpu7().state().pc == kBase + 4u);
+    REQUIRE(nds.cpu7().state().cycles == cycles_before + 1u);
+}
+
 // Direct-call tests for the addressing-mode normalization helpers in
 // arm7_block_internal.hpp. These cover every row of the §5.4 table and
 // the §5.8 empty-list case without standing up an NDS harness. Commit 5
@@ -792,10 +836,11 @@ int main() {
     test_stm_rn_in_list_not_lowest();
     test_ldm_rn_in_list_suppresses_writeback();
     test_ldm_r15_in_list_s0();
+    test_stm_r15_in_list();
     test_block_addressing_helpers();
 
     std::puts("arm7_block_test: LDM/STM IA base cases + {IA,IB,DA,DB} matrix + DB "
               "normalization + STM Rn-in-list old/new base + LDM Rn-in-list "
-              "writeback suppression + LDM R15 (S=0) word-align + helpers verified");
+              "writeback suppression + LDM/STM R15-in-list (S=0) + helpers verified");
     return 0;
 }

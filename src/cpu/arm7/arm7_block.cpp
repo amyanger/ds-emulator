@@ -24,11 +24,14 @@
 // state.r[15] directly, and after the loop the word-aligned target
 // is committed via `write_rd`. CPSR.T is never modified — that is an
 // ARMv5 interworking behavior and is explicitly out of scope here.
-// The §4.3 normalization in compute_block_addressing means the
-// transfer loop itself is mode-agnostic — only the start_addr and
-// wb_value change. The remaining constraints (no S-bit, non-empty
-// list, STM R15 still gated) stay in place and are wired up in their
-// dedicated follow-up commits.
+// Commit 12 adds the mirror STM form: when R15 is in the list, the
+// stored word is `instr_addr + 12` rather than `state.r[15]` (which
+// step_arm already advanced to `instr_addr + 8`), matching the ARM7
+// TRM PC-ahead-by-12 convention for STM. The §4.3 normalization in
+// compute_block_addressing means the transfer loop itself is
+// mode-agnostic — only the start_addr and wb_value change. The
+// remaining constraints (no S-bit, non-empty list) stay in place and
+// are wired up in their dedicated follow-up commits.
 
 #include "bus/arm7_bus.hpp"
 #include "cpu/arm7/arm7_block_internal.hpp"
@@ -80,16 +83,13 @@ u32 dispatch_block(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
 
     // Supported today: all four addressing modes (any {P, U}), free W,
     // no S-bit, non-empty list, Rn in list (both families — STM via
-    // §5.5 old/new-base split, LDM via writeback suppression). LDM
-    // with R15 in the list is handled via the deferred-R15 path below
-    // (ARMv4 word-align, leave CPSR.T alone). STM with R15 in the
-    // list still falls through to the warn stub (commit 12), as do
-    // the S=1 forms (commits 13/14) and the empty-list quirk
-    // (commit 15).
+    // §5.5 old/new-base split, LDM via writeback suppression), and
+    // R15 in list (LDM via the deferred word-aligned write below, STM
+    // via the `instr_addr + 12` rule inside the transfer loop). The
+    // S=1 forms and the empty-list quirk still fall through to the
+    // warn stub and land in later slice 3b4 commits.
     const bool rn_in_list = (reg_list & (1u << rn)) != 0u;
-    const bool r15_in_list = (reg_list & (1u << 15)) != 0u;
-    const bool stm_r15_in_list_unsupported = !l_bit && r15_in_list;
-    const bool is_supported = !s_bit && reg_list != 0u && !stm_r15_in_list_unsupported;
+    const bool is_supported = !s_bit && reg_list != 0u;
 
     if (!is_supported) {
         DS_LOG_WARN("arm7: LDM/STM path not yet implemented 0x%08X at 0x%08X", instr, instr_addr);
@@ -152,13 +152,19 @@ u32 dispatch_block(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
         }
     } else {
         // STM — store each listed register to [start_addr + 4*k],
-        // force-aligned per spec §4.4 STM step 5. R15-in-list is gated
-        // out above, so no PC+12 special case is needed yet. Decreasing
-        // modes share this loop because §4.3 already produced the
+        // force-aligned per spec §4.4 STM step 5. Decreasing modes
+        // share this loop because §4.3 already produced the
         // lowest-touched address in start_addr.
+        //
+        // When R15 is in the list the stored word is `instr_addr + 12`,
+        // NOT `state.r[15]`. Step_arm has already advanced `state.r[15]`
+        // to `instr_addr + 8` by the time dispatch runs, so reading it
+        // directly would give the wrong PC-ahead value (by one word)
+        // per §5.7 / ARM7TDMI TRM.
         for (u32 i = 0; i < 16; ++i) {
             if ((reg_list & (1u << i)) != 0u) {
-                bus.write32(addr & ~0x3u, state.r[i]);
+                const u32 stored = (i == 15) ? (instr_addr + 12u) : state.r[i];
+                bus.write32(addr & ~0x3u, stored);
                 addr += 4u;
             }
         }
