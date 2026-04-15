@@ -40,6 +40,14 @@ inline u32 read_rs_for_reg_shift(const Arm7State& s, u32 rs) {
     return (rs == 15) ? (s.r[15] + 4) : s.r[rs];
 }
 
+// LDR-style misaligned word rotate: ARMv4T rotates the aligned word read
+// right by (addr & 3) * 8 so that the requested byte lands in bits[7:0].
+// Used by LDR word load (arm7_loadstore.cpp) and by SWP word (commit 16).
+inline u32 rotate_read_word(u32 raw, u32 addr) {
+    const u32 rot = (addr & 0x3u) * 8u;
+    return (rot == 0) ? raw : ((raw >> rot) | (raw << (32u - rot)));
+}
+
 // Family dispatch helpers. Each returns the number of ARM7 cycles the
 // instruction consumed. In slice 3b1 every path returns 1.
 u32 dispatch_dp(Arm7State& state, u32 instr, u32 instr_addr);
