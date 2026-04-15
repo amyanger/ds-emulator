@@ -33,6 +33,11 @@ u32 dispatch_thumb_010_space(
 // Defined in arm7_thumb_dp.cpp.
 u32 dispatch_thumb_alu(
     Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
+
+// THUMB.5 hi-register operations (ADD/CMP/MOV) and BX.
+// Defined in arm7_thumb_dp.cpp.
+u32 dispatch_thumb_hireg_bx(
+    Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
 u32 dispatch_thumb_ldst_imm_wb(
     Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
 u32 dispatch_thumb_100_space(

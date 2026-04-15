@@ -464,6 +464,11 @@ static u16 thumb4(u32 op, u32 rs, u32 rd) {
     return static_cast<u16>((0b010000u << 10) | (op << 6) | (rs << 3) | rd);
 }
 
+// Encode THUMB.5: 010001 op2 Hd Hs Rs3 Rd3
+static u16 thumb5(u32 op, u32 hd, u32 hs, u32 rs, u32 rd) {
+    return static_cast<u16>((0b010001u << 10) | (op << 8) | (hd << 7) | (hs << 6) | (rs << 3) | rd);
+}
+
 // ==== THUMB.4 — ALU register/register ====
 
 static void thumb4_and() {
@@ -777,6 +782,191 @@ static void thumb4_same_reg_rd_rs() {
     REQUIRE(nds.cpu7().state().r[3] == 0xDEAD'BEEFu); // x & x = x
 }
 
+// ==== THUMB.5 — hi-register ADD/CMP/MOV + BX ====
+
+static void thumb5_add_hi_to_lo() {
+    // ADD R0, R8. R0=10, R8=20 → R0=30. CPSR unchanged.
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb5(0, 0, 1, 0, 0)); // ADD R0, R8 (Hd=0, Hs=1, Rs=0, Rd=0)
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 10;
+    nds.cpu7().state().r[8] = 20;
+    nds.cpu7().state().cpsr |= (1u << 29) | (1u << 28); // C=1, V=1
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 30);
+    REQUIRE(flag_c(nds.cpu7().state().cpsr)); // preserved
+    REQUIRE(flag_v(nds.cpu7().state().cpsr)); // preserved
+}
+
+static void thumb5_add_lo_to_hi() {
+    // ADD R8, R0. R8=100, R0=50 → R8=150. CPSR unchanged.
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb5(0, 1, 0, 0, 0)); // ADD R8, R0 (Hd=1, Hs=0, Rs=0, Rd=0)
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[8] = 100;
+    nds.cpu7().state().r[0] = 50;
+    nds.cpu7().state().cpsr |= (1u << 29); // C=1
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[8] == 150);
+    REQUIRE(flag_c(nds.cpu7().state().cpsr)); // preserved
+}
+
+static void thumb5_add_rd_r15() {
+    // ADD R15, R0 (Hd=1, Rd=7 → R15). Verify PC changes. CPSR unchanged.
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb5(0, 1, 0, 0, 7)); // ADD R15, R0
+    setup_thumb(nds, BASE);
+    // Rd=R15: rd_value reads $+4 (no alignment for ADD/CMP/MOV)
+    const u32 pc_val = BASE + 4;
+    nds.cpu7().state().r[0] = 0x100;
+    nds.cpu7().state().cpsr |= (1u << 29); // C=1
+    step_one(nds);
+    // Result = ($+4) + R0, then word-aligned by write_rd
+    const u32 expected = (pc_val + 0x100) & ~3u;
+    REQUIRE(nds.cpu7().state().pc == expected);
+    REQUIRE(flag_c(nds.cpu7().state().cpsr)); // preserved
+}
+
+static void thumb5_mov_hi_to_lo() {
+    // MOV R0, R8. R8=0xDEADBEEF → R0=0xDEADBEEF. CPSR unchanged.
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb5(2, 0, 1, 0, 0)); // MOV R0, R8
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[8] = 0xDEAD'BEEFu;
+    nds.cpu7().state().cpsr |= (1u << 29) | (1u << 28); // C=1, V=1
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 0xDEAD'BEEFu);
+    REQUIRE(flag_c(nds.cpu7().state().cpsr));
+    REQUIRE(flag_v(nds.cpu7().state().cpsr));
+}
+
+static void thumb5_mov_lo_to_hi() {
+    // MOV R8, R0. R0=42 → R8=42. CPSR unchanged.
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb5(2, 1, 0, 0, 0)); // MOV R8, R0
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 42;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[8] == 42);
+}
+
+static void thumb5_mov_nop() {
+    // MOV R8, R8 (Hd=1, Hs=1, Rs=0, Rd=0). R8 unchanged. CPSR unchanged.
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb5(2, 1, 1, 0, 0)); // MOV R8, R8
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[8] = 0x1234'5678u;
+    nds.cpu7().state().cpsr |= (1u << 29); // C=1
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[8] == 0x1234'5678u);
+    REQUIRE(flag_c(nds.cpu7().state().cpsr));
+}
+
+static void thumb5_cmp_equal() {
+    // CMP R0, R8. R0=50, R8=50. Z=1, C=1, N=0, V=0.
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb5(1, 0, 1, 0, 0)); // CMP R0, R8
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 50;
+    nds.cpu7().state().r[8] = 50;
+    step_one(nds);
+    REQUIRE(flag_z(nds.cpu7().state().cpsr));
+    REQUIRE(flag_c(nds.cpu7().state().cpsr));
+    REQUIRE(!flag_n(nds.cpu7().state().cpsr));
+    REQUIRE(!flag_v(nds.cpu7().state().cpsr));
+}
+
+static void thumb5_cmp_less() {
+    // CMP R0, R8. R0=10, R8=50. N=1, C=0.
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb5(1, 0, 1, 0, 0)); // CMP R0, R8
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 10;
+    nds.cpu7().state().r[8] = 50;
+    step_one(nds);
+    REQUIRE(flag_n(nds.cpu7().state().cpsr));
+    REQUIRE(!flag_c(nds.cpu7().state().cpsr));
+}
+
+static void thumb5_cmp_no_writeback() {
+    // CMP R0, R8. Verify R0 unchanged after.
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb5(1, 0, 1, 0, 0)); // CMP R0, R8
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 10;
+    nds.cpu7().state().r[8] = 50;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 10);
+}
+
+static void thumb5_bx_to_arm() {
+    // BX R0. R0=0x02000000 (bit0=0). CPSR.T clears. PC=0x02000000.
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb5(3, 0, 0, 0, 0)); // BX R0 (Hs=0, Rs=0 → R0)
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 0x0200'0000u;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().pc == 0x0200'0000u);
+    REQUIRE((nds.cpu7().state().cpsr & (1u << 5)) == 0); // T cleared
+}
+
+static void thumb5_bx_to_thumb() {
+    // BX R0. R0=0x02000001 (bit0=1). CPSR.T stays set. PC=0x02000000.
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb5(3, 0, 0, 0, 0)); // BX R0
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 0x0200'0001u;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().pc == 0x0200'0000u);
+    REQUIRE((nds.cpu7().state().cpsr & (1u << 5)) != 0); // T stays set
+}
+
+static void thumb5_rs_is_r15() {
+    // CMP R0, R15 at BASE+2 (misaligned so pc_read != pc_literal).
+    // GBATEK: CMP reads R15 as $+4 (no alignment), not ($+4) & ~2.
+    const u32 addr = BASE + 2;
+    NDS nds;
+    // Rs=15 → Hs=1, Rs=7. CMP R0, R15: op=1, Hd=0, Hs=1, Rs=7, Rd=0
+    nds.arm7_bus().write16(addr, thumb5(1, 0, 1, 7, 0)); // CMP R0, R15
+    setup_thumb(nds, addr);
+    const u32 pc_read = addr + 4;
+    REQUIRE(pc_read != ((addr + 4) & ~2u)); // guard: pc_read != pc_literal
+    nds.cpu7().state().r[0] = pc_read;
+    step_one(nds);
+    // R0 == pc_read → equal
+    REQUIRE(flag_z(nds.cpu7().state().cpsr));
+    REQUIRE(flag_c(nds.cpu7().state().cpsr));
+}
+
+static void thumb5_add_rs_r15_misaligned() {
+    // Place instruction at BASE+2 (halfword-aligned but not word-aligned).
+    // ADD R0, R15: Rs=15 reads $+4 = BASE+2+4 = BASE+6 (no alignment).
+    // GBATEK: ADD/CMP/MOV read R15 as $+4 without word-align-down.
+    // Only BX R15 applies the & ~2 alignment.
+    const u32 addr = BASE + 2;
+    NDS nds;
+    // Rs=15 → Hs=1, Rs=7. ADD R0, R15: op=0, Hd=0, Hs=1, Rs=7, Rd=0
+    nds.arm7_bus().write16(addr, thumb5(0, 0, 1, 7, 0));
+    setup_thumb(nds, addr);
+    nds.cpu7().state().r[0] = 0;
+    step_one(nds);
+    const u32 expected = addr + 4; // $+4, no alignment
+    REQUIRE(nds.cpu7().state().r[0] == expected);
+    REQUIRE(expected == (BASE + 6)); // bit 1 is set — no align-down
+}
+
+static void thumb5_blx_undef_on_armv4() {
+    // op=3, Hd=1 (BLX). Warn stub, PC advances by 2, CPSR unchanged.
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb5(3, 1, 0, 0, 0)); // BLX (Hd=1)
+    setup_thumb(nds, BASE);
+    const u32 cpsr_before = nds.cpu7().state().cpsr;
+    step_one(nds);
+    // PC should have advanced past the instruction (step_thumb sets pc = instr_addr + 2)
+    REQUIRE(nds.cpu7().state().pc == BASE + 2);
+    REQUIRE(nds.cpu7().state().cpsr == cpsr_before);
+}
+
 int main() {
     // THUMB.2
     thumb2_add_reg();
@@ -850,6 +1040,22 @@ int main() {
     thumb4_bic();
     thumb4_mvn();
     thumb4_same_reg_rd_rs();
+
+    // THUMB.5
+    thumb5_add_hi_to_lo();
+    thumb5_add_lo_to_hi();
+    thumb5_add_rd_r15();
+    thumb5_mov_hi_to_lo();
+    thumb5_mov_lo_to_hi();
+    thumb5_mov_nop();
+    thumb5_cmp_equal();
+    thumb5_cmp_less();
+    thumb5_cmp_no_writeback();
+    thumb5_bx_to_arm();
+    thumb5_bx_to_thumb();
+    thumb5_rs_is_r15();
+    thumb5_add_rs_r15_misaligned();
+    thumb5_blx_undef_on_armv4();
 
     return 0;
 }

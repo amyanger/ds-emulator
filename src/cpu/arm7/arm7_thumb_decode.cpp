@@ -32,7 +32,11 @@ u32 dispatch_thumb_010_space(
         // THUMB.4: 010000 op4 Rs3 Rd3
         return dispatch_thumb_alu(state, bus, instr, instr_addr, pc_read, pc_literal);
     }
-    // THUMB.5, .6, .7, .8 — stubs until their commits land.
+    if ((instr & 0xFC00u) == 0x4400u) {
+        // THUMB.5: 010001 op2 Hd Hs Rs3 Rd3
+        return dispatch_thumb_hireg_bx(state, bus, instr, instr_addr, pc_read, pc_literal);
+    }
+    // THUMB.6, .7, .8 — stubs until their commits land.
     DS_LOG_WARN("arm7/thumb: 010_space stub instr=0x%04X at 0x%08X", instr, instr_addr);
     return 1;
 }

@@ -156,4 +156,65 @@ u32 dispatch_thumb_alu(Arm7State& state,
     }
 }
 
+// ---- THUMB.5 (bits[15:10] == 010001) ----
+// Hi-register ADD/CMP/MOV and BX.  Operates on the full R0-R15 range.
+
+u32 dispatch_thumb_hireg_bx(
+    Arm7State& state, Arm7Bus& /*bus*/, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal) {
+    const u32 op = (instr >> 8) & 0x3u;
+    const u32 hd = (instr >> 7) & 0x1u;
+    const u32 hs = (instr >> 6) & 0x1u;
+    const u32 rs_full = (hs << 3) | ((instr >> 3) & 0x7u);
+    const u32 rd_full = (hd << 3) | (instr & 0x7u);
+
+    // PC-as-source: ADD/CMP/MOV read R15 as $+4 (no alignment).
+    // BX R15 uses ($+4) & ~2 (word-aligned for ARM-state target).
+    const u32 pc_for_op = (op == 3) ? pc_literal : pc_read;
+    const u32 rs_value = (rs_full == 15) ? pc_for_op : state.r[rs_full];
+    const u32 rd_value = (rd_full == 15) ? pc_for_op : state.r[rd_full];
+
+    switch (op) {
+    case 0: { // ADD — no flag update
+        if (hd == 0 && hs == 0) {
+            DS_LOG_WARN("arm7/thumb5: ADD with Hd=0 Hs=0 (UNPREDICTABLE) "
+                        "at 0x%08X",
+                        instr_addr);
+        }
+        const u32 result = rd_value + rs_value;
+        write_rd(state, rd_full, result);
+        return 1;
+    }
+    case 1: { // CMP — full NZCV, no writeback
+        if (hd == 0 && hs == 0) {
+            DS_LOG_WARN("arm7/thumb5: CMP with Hd=0 Hs=0 (UNPREDICTABLE) "
+                        "at 0x%08X",
+                        instr_addr);
+        }
+        const bool current_c = (state.cpsr & (1u << 29)) != 0;
+        execute_dp_op(state, DpOp::CMP, rd_value, rs_value, current_c, true, rd_full, instr_addr);
+        return 1;
+    }
+    case 2: { // MOV — no flag update
+        if (hd == 0 && hs == 0) {
+            DS_LOG_WARN("arm7/thumb5: MOV with Hd=0 Hs=0 (UNPREDICTABLE) "
+                        "at 0x%08X",
+                        instr_addr);
+        }
+        write_rd(state, rd_full, rs_value);
+        return 1;
+    }
+    case 3: { // BX (Hd=0) or BLX (Hd=1, ARMv5 only)
+        if (hd != 0) {
+            DS_LOG_WARN("arm7/thumb5: BLX (Hd=1) is ARMv5 only, stub on "
+                        "ARMv4 at 0x%08X",
+                        instr_addr);
+            return 1;
+        }
+        return execute_bx(state, rs_value);
+    }
+    default:
+        return 1; // unreachable
+    }
+}
+
 } // namespace ds
