@@ -1,6 +1,6 @@
 # 🎮 ds-emulator
 
-> A from-scratch **Nintendo DS** emulator written in **C++20**, built for the love of the craft and the dream of replaying *Pokémon HeartGold* on a machine I built myself.
+> A from-scratch **Nintendo DS** emulator written in **C++20**
 
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus&logoColor=white)](https://en.cppreference.com/w/cpp/20)
 [![CMake](https://img.shields.io/badge/CMake-3.20%2B-064F8C?logo=cmake&logoColor=white)](https://cmake.org/)
