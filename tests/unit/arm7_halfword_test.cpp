@@ -24,7 +24,7 @@ constexpr u32 kBase = 0x0380'0000u;
 // pipeline model, and run exactly one ARM7 cycle.
 static void run_one(NDS& nds, u32 pc, u32 instr) {
     nds.arm7_bus().write32(pc, instr);
-    nds.cpu7().state().pc    = pc;
+    nds.cpu7().state().pc = pc;
     nds.cpu7().state().r[15] = pc + 8;
     const u64 cycles_before = nds.cpu7().state().cycles;
     nds.cpu7().run_until((cycles_before + 1) * 2);
@@ -32,50 +32,34 @@ static void run_one(NDS& nds, u32 pc, u32 instr) {
 
 // Encode the immediate-offset form of a halfword transfer.
 //   cond | 000 | P | U | 1 | W | L | Rn | Rd | imm[7:4] | 1 SH 1 | imm[3:0]
-static u32 encode_halfword_imm(u8 cond, u8 p, u8 u, u8 w, u8 l,
-                               u8 rn, u8 rd, u8 sh, u8 offset8) {
-    return (u32(cond) << 28)
-         | (0b000u << 25)               // bits[27:25] = 000
-         | (u32(p) << 24)
-         | (u32(u) << 23)
-         | (1u << 22)                   // I = 1 (immediate)
-         | (u32(w) << 21)
-         | (u32(l) << 20)
-         | (u32(rn) << 16)
-         | (u32(rd) << 12)
-         | (u32(offset8 & 0xF0u) << 4)  // upper 4 bits -> bits[11:8]
-         | (1u << 7)                    // fixed bit 7
-         | (u32(sh) << 5)
-         | (1u << 4)                    // fixed bit 4
-         | u32(offset8 & 0x0Fu);        // lower 4 bits -> bits[3:0]
+static u32 encode_halfword_imm(u8 cond, u8 p, u8 u, u8 w, u8 l, u8 rn, u8 rd, u8 sh, u8 offset8) {
+    return (u32(cond) << 28) | (0b000u << 25)             // bits[27:25] = 000
+           | (u32(p) << 24) | (u32(u) << 23) | (1u << 22) // I = 1 (immediate)
+           | (u32(w) << 21) | (u32(l) << 20) | (u32(rn) << 16) | (u32(rd) << 12) |
+           (u32(offset8 & 0xF0u) << 4)  // upper 4 bits -> bits[11:8]
+           | (1u << 7)                  // fixed bit 7
+           | (u32(sh) << 5) | (1u << 4) // fixed bit 4
+           | u32(offset8 & 0x0Fu);      // lower 4 bits -> bits[3:0]
 }
 
 // Encode the register-offset form of a halfword transfer.
 //   cond | 000 | P | U | 0 | W | L | Rn | Rd | 0000 | 1 SH 1 | Rm
-static u32 encode_halfword_reg(u8 cond, u8 p, u8 u, u8 w, u8 l,
-                               u8 rn, u8 rd, u8 sh, u8 rm) {
-    return (u32(cond) << 28)
-         | (0b000u << 25)
-         | (u32(p) << 24)
-         | (u32(u) << 23)
-         // I = 0 (register offset)
-         | (u32(w) << 21)
-         | (u32(l) << 20)
-         | (u32(rn) << 16)
-         | (u32(rd) << 12)
-         // bits[11:8] = 0
-         | (1u << 7)
-         | (u32(sh) << 5)
-         | (1u << 4)
-         | u32(rm);
+static u32 encode_halfword_reg(u8 cond, u8 p, u8 u, u8 w, u8 l, u8 rn, u8 rd, u8 sh, u8 rm) {
+    return (u32(cond) << 28) | (0b000u << 25) | (u32(p) << 24) |
+           (u32(u) << 23)
+           // I = 0 (register offset)
+           | (u32(w) << 21) | (u32(l) << 20) | (u32(rn) << 16) |
+           (u32(rd) << 12)
+           // bits[11:8] = 0
+           | (1u << 7) | (u32(sh) << 5) | (1u << 4) | u32(rm);
 }
 
 constexpr u8 kCondAL = 0xE;
-constexpr u8 kSHhalf = 1;  // SH=1 -> halfword unsigned
-constexpr u8 kSHsb   = 2;  // SH=2 -> signed byte
-constexpr u8 kSHsh   = 3;  // SH=3 -> signed halfword
+constexpr u8 kSHhalf = 1; // SH=1 -> halfword unsigned
+constexpr u8 kSHsb = 2;   // SH=2 -> signed byte
+constexpr u8 kSHsh = 3;   // SH=3 -> signed halfword
 
-}  // namespace
+} // namespace
 
 // ---- Basic aligned loads ---------------------------------------------------
 
@@ -85,12 +69,20 @@ static void test_ldrh_imm_preindex_up_no_writeback() {
     nds.cpu7().state().r[1] = 0x0380'0100u;
     nds.arm7_bus().write16(0x0380'0104u, 0xBEEFu);
 
-    run_one(nds, kBase,
-            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
-                                /*Rn*/1, /*Rd*/0, kSHhalf, /*off*/4));
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 1,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHhalf,
+                                /*off*/ 4));
 
     REQUIRE(nds.cpu7().state().r[0] == 0x0000'BEEFu);
-    REQUIRE(nds.cpu7().state().r[1] == 0x0380'0100u);  // unchanged
+    REQUIRE(nds.cpu7().state().r[1] == 0x0380'0100u); // unchanged
 }
 
 // LDRH R0, [R1, #4]!  — pre-index, up, writeback.
@@ -99,9 +91,17 @@ static void test_ldrh_imm_preindex_up_writeback() {
     nds.cpu7().state().r[1] = 0x0380'0100u;
     nds.arm7_bus().write16(0x0380'0104u, 0xBEEFu);
 
-    run_one(nds, kBase,
-            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/1, /*L*/1,
-                                /*Rn*/1, /*Rd*/0, kSHhalf, /*off*/4));
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 1,
+                                /*L*/ 1,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHhalf,
+                                /*off*/ 4));
 
     REQUIRE(nds.cpu7().state().r[0] == 0x0000'BEEFu);
     REQUIRE(nds.cpu7().state().r[1] == 0x0380'0104u);
@@ -113,9 +113,17 @@ static void test_ldrh_imm_preindex_down_writeback() {
     nds.cpu7().state().r[1] = 0x0380'0106u;
     nds.arm7_bus().write16(0x0380'0104u, 0x1234u);
 
-    run_one(nds, kBase,
-            encode_halfword_imm(kCondAL, /*P*/1, /*U*/0, /*W*/1, /*L*/1,
-                                /*Rn*/1, /*Rd*/0, kSHhalf, /*off*/2));
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 0,
+                                /*W*/ 1,
+                                /*L*/ 1,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHhalf,
+                                /*off*/ 2));
 
     REQUIRE(nds.cpu7().state().r[0] == 0x0000'1234u);
     REQUIRE(nds.cpu7().state().r[1] == 0x0380'0104u);
@@ -127,9 +135,17 @@ static void test_ldrh_imm_postindex_up() {
     nds.cpu7().state().r[1] = 0x0380'0108u;
     nds.arm7_bus().write16(0x0380'0108u, 0xCAFEu);
 
-    run_one(nds, kBase,
-            encode_halfword_imm(kCondAL, /*P*/0, /*U*/1, /*W*/0, /*L*/1,
-                                /*Rn*/1, /*Rd*/0, kSHhalf, /*off*/2));
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 0,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 1,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHhalf,
+                                /*off*/ 2));
 
     REQUIRE(nds.cpu7().state().r[0] == 0x0000'CAFEu);
     REQUIRE(nds.cpu7().state().r[1] == 0x0380'010Au);
@@ -141,9 +157,17 @@ static void test_ldrh_imm_postindex_down() {
     nds.cpu7().state().r[1] = 0x0380'010Au;
     nds.arm7_bus().write16(0x0380'010Au, 0xDEADu);
 
-    run_one(nds, kBase,
-            encode_halfword_imm(kCondAL, /*P*/0, /*U*/0, /*W*/0, /*L*/1,
-                                /*Rn*/1, /*Rd*/0, kSHhalf, /*off*/2));
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 0,
+                                /*U*/ 0,
+                                /*W*/ 0,
+                                /*L*/ 1,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHhalf,
+                                /*off*/ 2));
 
     REQUIRE(nds.cpu7().state().r[0] == 0x0000'DEADu);
     REQUIRE(nds.cpu7().state().r[1] == 0x0380'0108u);
@@ -156,9 +180,17 @@ static void test_ldrh_reg_preindex_up_no_writeback() {
     nds.cpu7().state().r[2] = 0x10u;
     nds.arm7_bus().write16(0x0380'0110u, 0x5678u);
 
-    run_one(nds, kBase,
-            encode_halfword_reg(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
-                                /*Rn*/1, /*Rd*/0, kSHhalf, /*Rm*/2));
+    run_one(nds,
+            kBase,
+            encode_halfword_reg(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 1,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHhalf,
+                                /*Rm*/ 2));
 
     REQUIRE(nds.cpu7().state().r[0] == 0x0000'5678u);
     REQUIRE(nds.cpu7().state().r[1] == 0x0380'0100u);
@@ -174,11 +206,19 @@ static void test_ldrh_zero_extension() {
     nds.cpu7().state().r[1] = 0x0380'0200u;
     nds.arm7_bus().write16(0x0380'0200u, 0x8000u);
 
-    run_one(nds, kBase,
-            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
-                                /*Rn*/1, /*Rd*/0, kSHhalf, /*off*/0));
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 1,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHhalf,
+                                /*off*/ 0));
 
-    REQUIRE(nds.cpu7().state().r[0] == 0x0000'8000u);  // not 0xFFFF'8000
+    REQUIRE(nds.cpu7().state().r[0] == 0x0000'8000u); // not 0xFFFF'8000
 }
 
 // ---- Offset composition edge cases ----------------------------------------
@@ -190,9 +230,17 @@ static void test_ldrh_imm_offset_0xFE() {
     nds.cpu7().state().r[1] = 0x0380'0100u;
     nds.arm7_bus().write16(0x0380'01FEu, 0xBABEu);
 
-    run_one(nds, kBase,
-            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
-                                /*Rn*/1, /*Rd*/0, kSHhalf, /*off*/0xFE));
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 1,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHhalf,
+                                /*off*/ 0xFE));
 
     REQUIRE(nds.cpu7().state().r[0] == 0x0000'BABEu);
 }
@@ -203,9 +251,17 @@ static void test_ldrh_imm_offset_zero() {
     nds.cpu7().state().r[1] = 0x0380'0220u;
     nds.arm7_bus().write16(0x0380'0220u, 0x00FFu);
 
-    run_one(nds, kBase,
-            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
-                                /*Rn*/1, /*Rd*/0, kSHhalf, /*off*/0));
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 1,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHhalf,
+                                /*off*/ 0));
 
     REQUIRE(nds.cpu7().state().r[0] == 0x0000'00FFu);
     REQUIRE(nds.cpu7().state().r[1] == 0x0380'0220u);
@@ -221,12 +277,20 @@ static void test_ldrh_unaligned_odd_address_imm_masks_low_bit() {
     nds.cpu7().state().r[1] = 0x0380'0100u;
     nds.arm7_bus().write16(0x0380'0104u, 0xBEEFu);
 
-    run_one(nds, kBase,
-            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
-                                /*Rn*/1, /*Rd*/0, kSHhalf, /*off*/5));
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 1,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHhalf,
+                                /*off*/ 5));
 
     REQUIRE(nds.cpu7().state().r[0] == 0x0000'BEEFu);
-    REQUIRE(nds.cpu7().state().r[1] == 0x0380'0100u);  // unchanged
+    REQUIRE(nds.cpu7().state().r[1] == 0x0380'0100u); // unchanged
 }
 
 // LDRH R0, [R1, R2]  — odd effective address via register offset. Same
@@ -237,13 +301,21 @@ static void test_ldrh_unaligned_odd_address_reg_masks_low_bit() {
     nds.cpu7().state().r[2] = 0x0000'0001u;
     nds.arm7_bus().write16(0x0380'0200u, 0xCAFEu);
 
-    run_one(nds, kBase,
-            encode_halfword_reg(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
-                                /*Rn*/1, /*Rd*/0, kSHhalf, /*Rm*/2));
+    run_one(nds,
+            kBase,
+            encode_halfword_reg(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 1,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHhalf,
+                                /*Rm*/ 2));
 
     REQUIRE(nds.cpu7().state().r[0] == 0x0000'CAFEu);
-    REQUIRE(nds.cpu7().state().r[1] == 0x0380'0200u);  // unchanged
-    REQUIRE(nds.cpu7().state().r[2] == 0x0000'0001u);  // unchanged
+    REQUIRE(nds.cpu7().state().r[1] == 0x0380'0200u); // unchanged
+    REQUIRE(nds.cpu7().state().r[2] == 0x0000'0001u); // unchanged
 }
 
 // ---- STRH aligned cases ---------------------------------------------------
@@ -254,12 +326,20 @@ static void test_strh_imm_preindex_up_no_writeback() {
     nds.cpu7().state().r[1] = 0x0380'0200u;
     nds.cpu7().state().r[0] = 0x0000'ABCDu;
 
-    run_one(nds, kBase,
-            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/0,
-                                /*Rn*/1, /*Rd*/0, kSHhalf, /*off*/4));
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 0,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHhalf,
+                                /*off*/ 4));
 
     REQUIRE(nds.arm7_bus().read16(0x0380'0204u) == 0xABCDu);
-    REQUIRE(nds.cpu7().state().r[1] == 0x0380'0200u);  // unchanged
+    REQUIRE(nds.cpu7().state().r[1] == 0x0380'0200u); // unchanged
 }
 
 // STRH R0, [R1, #4]!  — pre-index, up, writeback.
@@ -268,9 +348,17 @@ static void test_strh_imm_preindex_up_writeback() {
     nds.cpu7().state().r[1] = 0x0380'0200u;
     nds.cpu7().state().r[0] = 0x0000'ABCDu;
 
-    run_one(nds, kBase,
-            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/1, /*L*/0,
-                                /*Rn*/1, /*Rd*/0, kSHhalf, /*off*/4));
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 1,
+                                /*L*/ 0,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHhalf,
+                                /*off*/ 4));
 
     REQUIRE(nds.arm7_bus().read16(0x0380'0204u) == 0xABCDu);
     REQUIRE(nds.cpu7().state().r[1] == 0x0380'0204u);
@@ -282,9 +370,17 @@ static void test_strh_imm_preindex_down_writeback() {
     nds.cpu7().state().r[1] = 0x0380'0206u;
     nds.cpu7().state().r[0] = 0x0000'1234u;
 
-    run_one(nds, kBase,
-            encode_halfword_imm(kCondAL, /*P*/1, /*U*/0, /*W*/1, /*L*/0,
-                                /*Rn*/1, /*Rd*/0, kSHhalf, /*off*/2));
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 0,
+                                /*W*/ 1,
+                                /*L*/ 0,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHhalf,
+                                /*off*/ 2));
 
     REQUIRE(nds.arm7_bus().read16(0x0380'0204u) == 0x1234u);
     REQUIRE(nds.cpu7().state().r[1] == 0x0380'0204u);
@@ -297,9 +393,17 @@ static void test_strh_imm_postindex_up() {
     nds.cpu7().state().r[1] = 0x0380'0208u;
     nds.cpu7().state().r[0] = 0x0000'CAFEu;
 
-    run_one(nds, kBase,
-            encode_halfword_imm(kCondAL, /*P*/0, /*U*/1, /*W*/0, /*L*/0,
-                                /*Rn*/1, /*Rd*/0, kSHhalf, /*off*/2));
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 0,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 0,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHhalf,
+                                /*off*/ 2));
 
     REQUIRE(nds.arm7_bus().read16(0x0380'0208u) == 0xCAFEu);
     REQUIRE(nds.cpu7().state().r[1] == 0x0380'020Au);
@@ -312,9 +416,17 @@ static void test_strh_reg_preindex_up_no_writeback() {
     nds.cpu7().state().r[2] = 0x10u;
     nds.cpu7().state().r[0] = 0x0000'5678u;
 
-    run_one(nds, kBase,
-            encode_halfword_reg(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/0,
-                                /*Rn*/1, /*Rd*/0, kSHhalf, /*Rm*/2));
+    run_one(nds,
+            kBase,
+            encode_halfword_reg(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 0,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHhalf,
+                                /*Rm*/ 2));
 
     REQUIRE(nds.arm7_bus().read16(0x0380'0210u) == 0x5678u);
     REQUIRE(nds.cpu7().state().r[1] == 0x0380'0200u);
@@ -332,12 +444,20 @@ static void test_strh_only_low_16_bits_written() {
     // Little-endian: word 0xFACE0000 puts 0x0000 at +0, 0xFACE at +2.
     nds.arm7_bus().write32(0x0380'0300u, 0xFACE'0000u);
 
-    run_one(nds, kBase,
-            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/0,
-                                /*Rn*/1, /*Rd*/0, kSHhalf, /*off*/0));
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 0,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHhalf,
+                                /*off*/ 0));
 
-    REQUIRE(nds.arm7_bus().read16(0x0380'0300u) == 0xBEEFu);   // low 16 only
-    REQUIRE(nds.arm7_bus().read16(0x0380'0302u) == 0xFACEu);   // untouched
+    REQUIRE(nds.arm7_bus().read16(0x0380'0300u) == 0xBEEFu); // low 16 only
+    REQUIRE(nds.arm7_bus().read16(0x0380'0302u) == 0xFACEu); // untouched
     // Little-endian word read: low half first, high half second.
     REQUIRE(nds.arm7_bus().read32(0x0380'0300u) == 0xFACE'BEEFu);
 }
@@ -349,11 +469,19 @@ static void test_strh_only_low_16_bits_written() {
 static void test_strh_rd_eq_r15_reads_pc_plus_12() {
     NDS nds;
     nds.cpu7().state().r[0] = 0x0380'0400u;
-    nds.arm7_bus().write16(0x0380'0400u, 0xAAAAu);  // sentinel
+    nds.arm7_bus().write16(0x0380'0400u, 0xAAAAu); // sentinel
 
-    run_one(nds, kBase,
-            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/0,
-                                /*Rn*/0, /*Rd*/15, kSHhalf, /*off*/0));
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 0,
+                                /*Rn*/ 0,
+                                /*Rd*/ 15,
+                                kSHhalf,
+                                /*off*/ 0));
 
     // (kBase + 12) & 0xFFFF == 0x000C
     REQUIRE(nds.arm7_bus().read16(0x0380'0400u) == 0x000Cu);
@@ -368,17 +496,25 @@ static void test_strh_unaligned_odd_address_imm_masks_low_bit() {
     NDS nds;
     nds.cpu7().state().r[0] = 0xDEAD'BEEFu;
     nds.cpu7().state().r[1] = 0x0380'0100u;
-    nds.arm7_bus().write16(0x0380'0104u, 0x0000u);  // clean slate
-    nds.arm7_bus().write16(0x0380'0106u, 0x0000u);  // clean slate
+    nds.arm7_bus().write16(0x0380'0104u, 0x0000u); // clean slate
+    nds.arm7_bus().write16(0x0380'0106u, 0x0000u); // clean slate
 
-    run_one(nds, kBase,
-            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/0,
-                                /*Rn*/1, /*Rd*/0, kSHhalf, /*off*/5));
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 0,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHhalf,
+                                /*off*/ 5));
 
-    REQUIRE(nds.arm7_bus().read16(0x0380'0104u) == 0xBEEFu);  // addr & ~1
-    REQUIRE(nds.arm7_bus().read16(0x0380'0106u) == 0x0000u);  // untouched
-    REQUIRE(nds.cpu7().state().r[0] == 0xDEAD'BEEFu);         // unchanged
-    REQUIRE(nds.cpu7().state().r[1] == 0x0380'0100u);         // unchanged
+    REQUIRE(nds.arm7_bus().read16(0x0380'0104u) == 0xBEEFu); // addr & ~1
+    REQUIRE(nds.arm7_bus().read16(0x0380'0106u) == 0x0000u); // untouched
+    REQUIRE(nds.cpu7().state().r[0] == 0xDEAD'BEEFu);        // unchanged
+    REQUIRE(nds.cpu7().state().r[1] == 0x0380'0100u);        // unchanged
 }
 
 // STRH R0, [R1, R2]  — odd effective address via register offset. Same
@@ -388,18 +524,26 @@ static void test_strh_unaligned_odd_address_reg_masks_low_bit() {
     nds.cpu7().state().r[0] = 0xCAFE'BABEu;
     nds.cpu7().state().r[1] = 0x0380'0200u;
     nds.cpu7().state().r[2] = 0x0000'0001u;
-    nds.arm7_bus().write16(0x0380'0200u, 0x0000u);  // clean slate
-    nds.arm7_bus().write16(0x0380'0202u, 0x0000u);  // clean slate
+    nds.arm7_bus().write16(0x0380'0200u, 0x0000u); // clean slate
+    nds.arm7_bus().write16(0x0380'0202u, 0x0000u); // clean slate
 
-    run_one(nds, kBase,
-            encode_halfword_reg(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/0,
-                                /*Rn*/1, /*Rd*/0, kSHhalf, /*Rm*/2));
+    run_one(nds,
+            kBase,
+            encode_halfword_reg(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 0,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHhalf,
+                                /*Rm*/ 2));
 
-    REQUIRE(nds.arm7_bus().read16(0x0380'0200u) == 0xBABEu);  // addr & ~1
-    REQUIRE(nds.arm7_bus().read16(0x0380'0202u) == 0x0000u);  // untouched
-    REQUIRE(nds.cpu7().state().r[0] == 0xCAFE'BABEu);         // unchanged
-    REQUIRE(nds.cpu7().state().r[1] == 0x0380'0200u);         // unchanged
-    REQUIRE(nds.cpu7().state().r[2] == 0x0000'0001u);         // unchanged
+    REQUIRE(nds.arm7_bus().read16(0x0380'0200u) == 0xBABEu); // addr & ~1
+    REQUIRE(nds.arm7_bus().read16(0x0380'0202u) == 0x0000u); // untouched
+    REQUIRE(nds.cpu7().state().r[0] == 0xCAFE'BABEu);        // unchanged
+    REQUIRE(nds.cpu7().state().r[1] == 0x0380'0200u);        // unchanged
+    REQUIRE(nds.cpu7().state().r[2] == 0x0000'0001u);        // unchanged
 }
 
 // ---- LDRSB cases ----------------------------------------------------------
@@ -411,9 +555,17 @@ static void test_ldrsb_positive_byte() {
     nds.cpu7().state().r[1] = 0x0380'0500u;
     nds.arm7_bus().write8(0x0380'0500u, 0x7Fu);
 
-    run_one(nds, kBase,
-            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
-                                /*Rn*/1, /*Rd*/0, kSHsb, /*off*/0));
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 1,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHsb,
+                                /*off*/ 0));
 
     REQUIRE(nds.cpu7().state().r[0] == 0x0000'007Fu);
 }
@@ -425,9 +577,17 @@ static void test_ldrsb_negative_byte_sign_extended() {
     nds.cpu7().state().r[1] = 0x0380'0501u;
     nds.arm7_bus().write8(0x0380'0501u, 0x80u);
 
-    run_one(nds, kBase,
-            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
-                                /*Rn*/1, /*Rd*/0, kSHsb, /*off*/0));
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 1,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHsb,
+                                /*off*/ 0));
 
     REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'FF80u);
 }
@@ -439,9 +599,17 @@ static void test_ldrsb_negative_byte_ff() {
     nds.cpu7().state().r[1] = 0x0380'0502u;
     nds.arm7_bus().write8(0x0380'0502u, 0xFFu);
 
-    run_one(nds, kBase,
-            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
-                                /*Rn*/1, /*Rd*/0, kSHsb, /*off*/0));
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 1,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHsb,
+                                /*off*/ 0));
 
     REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'FFFFu);
 }
@@ -453,9 +621,17 @@ static void test_ldrsb_imm_postindex_writeback() {
     nds.cpu7().state().r[1] = 0x0380'0300u;
     nds.arm7_bus().write8(0x0380'0300u, 0x81u);
 
-    run_one(nds, kBase,
-            encode_halfword_imm(kCondAL, /*P*/0, /*U*/1, /*W*/0, /*L*/1,
-                                /*Rn*/1, /*Rd*/0, kSHsb, /*off*/4));
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 0,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 1,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHsb,
+                                /*off*/ 4));
 
     REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'FF81u);
     REQUIRE(nds.cpu7().state().r[1] == 0x0380'0304u);
@@ -468,9 +644,17 @@ static void test_ldrsb_reg_preindex_up() {
     nds.cpu7().state().r[2] = 0x10u;
     nds.arm7_bus().write8(0x0380'0310u, 0x40u);
 
-    run_one(nds, kBase,
-            encode_halfword_reg(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
-                                /*Rn*/1, /*Rd*/0, kSHsb, /*Rm*/2));
+    run_one(nds,
+            kBase,
+            encode_halfword_reg(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 1,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHsb,
+                                /*Rm*/ 2));
 
     REQUIRE(nds.cpu7().state().r[0] == 0x0000'0040u);
 }
@@ -479,12 +663,20 @@ static void test_ldrsb_reg_preindex_up() {
 // alignment rule, so this must work cleanly with no mask applied.
 static void test_ldrsb_unaligned_address_is_fine() {
     NDS nds;
-    nds.cpu7().state().r[1] = 0x0380'0305u;  // odd
+    nds.cpu7().state().r[1] = 0x0380'0305u; // odd
     nds.arm7_bus().write8(0x0380'0305u, 0xC3u);
 
-    run_one(nds, kBase,
-            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
-                                /*Rn*/1, /*Rd*/0, kSHsb, /*off*/0));
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 1,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHsb,
+                                /*off*/ 0));
 
     REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'FFC3u);
 }
@@ -498,9 +690,17 @@ static void test_ldrsh_positive_halfword() {
     nds.cpu7().state().r[1] = 0x0380'0600u;
     nds.arm7_bus().write16(0x0380'0600u, 0x1234u);
 
-    run_one(nds, kBase,
-            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
-                                /*Rn*/1, /*Rd*/0, kSHsh, /*off*/0));
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 1,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHsh,
+                                /*off*/ 0));
 
     REQUIRE(nds.cpu7().state().r[0] == 0x0000'1234u);
 }
@@ -512,9 +712,17 @@ static void test_ldrsh_negative_halfword_sign_extended() {
     nds.cpu7().state().r[1] = 0x0380'0602u;
     nds.arm7_bus().write16(0x0380'0602u, 0x8000u);
 
-    run_one(nds, kBase,
-            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
-                                /*Rn*/1, /*Rd*/0, kSHsh, /*off*/0));
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 1,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHsh,
+                                /*off*/ 0));
 
     REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'8000u);
 }
@@ -526,9 +734,17 @@ static void test_ldrsh_negative_halfword_ffff() {
     nds.cpu7().state().r[1] = 0x0380'0604u;
     nds.arm7_bus().write16(0x0380'0604u, 0xFFFFu);
 
-    run_one(nds, kBase,
-            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
-                                /*Rn*/1, /*Rd*/0, kSHsh, /*off*/0));
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 1,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHsh,
+                                /*off*/ 0));
 
     REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'FFFFu);
 }
@@ -541,9 +757,17 @@ static void test_ldrsh_imm_preindex_up_writeback() {
     nds.cpu7().state().r[1] = 0x0380'0700u;
     nds.arm7_bus().write16(0x0380'0704u, 0xABCDu);
 
-    run_one(nds, kBase,
-            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/1, /*L*/1,
-                                /*Rn*/1, /*Rd*/0, kSHsh, /*off*/4));
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 1,
+                                /*L*/ 1,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHsh,
+                                /*off*/ 4));
 
     REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'ABCDu);
     REQUIRE(nds.cpu7().state().r[1] == 0x0380'0704u);
@@ -556,9 +780,17 @@ static void test_ldrsh_imm_postindex_down() {
     nds.cpu7().state().r[1] = 0x0380'0710u;
     nds.arm7_bus().write16(0x0380'0710u, 0x7FFFu);
 
-    run_one(nds, kBase,
-            encode_halfword_imm(kCondAL, /*P*/0, /*U*/0, /*W*/0, /*L*/1,
-                                /*Rn*/1, /*Rd*/0, kSHsh, /*off*/2));
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 0,
+                                /*U*/ 0,
+                                /*W*/ 0,
+                                /*L*/ 1,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHsh,
+                                /*off*/ 2));
 
     REQUIRE(nds.cpu7().state().r[0] == 0x0000'7FFFu);
     REQUIRE(nds.cpu7().state().r[1] == 0x0380'070Eu);
@@ -571,9 +803,17 @@ static void test_ldrsh_reg_preindex_up() {
     nds.cpu7().state().r[2] = 0x10u;
     nds.arm7_bus().write16(0x0380'0730u, 0x9001u);
 
-    run_one(nds, kBase,
-            encode_halfword_reg(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
-                                /*Rn*/1, /*Rd*/0, kSHsh, /*Rm*/2));
+    run_one(nds,
+            kBase,
+            encode_halfword_reg(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 1,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHsh,
+                                /*Rm*/ 2));
 
     REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'9001u);
 }
@@ -585,9 +825,17 @@ static void test_ldrsh_positive_halfword_7fff() {
     nds.cpu7().state().r[1] = 0x0380'0740u;
     nds.arm7_bus().write16(0x0380'0740u, 0x7FFFu);
 
-    run_one(nds, kBase,
-            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
-                                /*Rn*/1, /*Rd*/0, kSHsh, /*off*/0));
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 1,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHsh,
+                                /*off*/ 0));
 
     REQUIRE(nds.cpu7().state().r[0] == 0x0000'7FFFu);
 }
@@ -607,12 +855,20 @@ static void test_ldrsh_unaligned_odd_address_imm_masks_low_bit() {
     nds.cpu7().state().r[1] = 0x0380'0100u;
     nds.arm7_bus().write16(0x0380'0104u, 0x80F0u);
 
-    run_one(nds, kBase,
-            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
-                                /*Rn*/1, /*Rd*/0, kSHsh, /*off*/5));
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 1,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHsh,
+                                /*off*/ 5));
 
     REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'80F0u);
-    REQUIRE(nds.cpu7().state().r[1] == 0x0380'0100u);  // unchanged
+    REQUIRE(nds.cpu7().state().r[1] == 0x0380'0100u); // unchanged
 }
 
 // LDRSH R0, [R1, R2]  — odd effective address via register offset. Same
@@ -625,13 +881,21 @@ static void test_ldrsh_unaligned_odd_address_reg_masks_low_bit() {
     nds.cpu7().state().r[2] = 0x0000'0001u;
     nds.arm7_bus().write16(0x0380'0200u, 0x8001u);
 
-    run_one(nds, kBase,
-            encode_halfword_reg(kCondAL, /*P*/1, /*U*/1, /*W*/0, /*L*/1,
-                                /*Rn*/1, /*Rd*/0, kSHsh, /*Rm*/2));
+    run_one(nds,
+            kBase,
+            encode_halfword_reg(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 1,
+                                /*Rn*/ 1,
+                                /*Rd*/ 0,
+                                kSHsh,
+                                /*Rm*/ 2));
 
     REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'8001u);
-    REQUIRE(nds.cpu7().state().r[1] == 0x0380'0200u);  // unchanged
-    REQUIRE(nds.cpu7().state().r[2] == 0x0000'0001u);  // unchanged
+    REQUIRE(nds.cpu7().state().r[1] == 0x0380'0200u); // unchanged
+    REQUIRE(nds.cpu7().state().r[2] == 0x0000'0001u); // unchanged
 }
 
 // ---- Rn == Rd writeback suppression (loads) -------------------------------
@@ -650,12 +914,20 @@ static void test_ldrh_rn_eq_rd_writeback_suppressed() {
     nds.cpu7().state().r[0] = 0x0380'0500u;
     nds.arm7_bus().write16(0x0380'0504u, 0xBEEFu);
 
-    run_one(nds, kBase,
-            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/1, /*L*/1,
-                                /*Rn*/0, /*Rd*/0, kSHhalf, /*off*/4));
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 1,
+                                /*L*/ 1,
+                                /*Rn*/ 0,
+                                /*Rd*/ 0,
+                                kSHhalf,
+                                /*off*/ 4));
 
-    REQUIRE(nds.cpu7().state().r[0] == 0x0000'BEEFu);   // loaded value wins
-    REQUIRE(nds.cpu7().state().r[0] != 0x0380'0504u);   // writeback suppressed
+    REQUIRE(nds.cpu7().state().r[0] == 0x0000'BEEFu); // loaded value wins
+    REQUIRE(nds.cpu7().state().r[0] != 0x0380'0504u); // writeback suppressed
 }
 
 // LDRSB R0, [R0, #1]!  — sign-extended byte wins, writeback suppressed.
@@ -664,12 +936,20 @@ static void test_ldrsb_rn_eq_rd_writeback_suppressed() {
     nds.cpu7().state().r[0] = 0x0380'0600u;
     nds.arm7_bus().write8(0x0380'0601u, 0xFFu);
 
-    run_one(nds, kBase,
-            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/1, /*L*/1,
-                                /*Rn*/0, /*Rd*/0, kSHsb, /*off*/1));
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 1,
+                                /*L*/ 1,
+                                /*Rn*/ 0,
+                                /*Rd*/ 0,
+                                kSHsb,
+                                /*off*/ 1));
 
-    REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'FFFFu);   // sign-extended
-    REQUIRE(nds.cpu7().state().r[0] != 0x0380'0601u);   // writeback suppressed
+    REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'FFFFu); // sign-extended
+    REQUIRE(nds.cpu7().state().r[0] != 0x0380'0601u); // writeback suppressed
 }
 
 // LDRSH R0, [R0, #2]!  — sign-extended halfword wins, writeback suppressed.
@@ -678,12 +958,20 @@ static void test_ldrsh_rn_eq_rd_writeback_suppressed() {
     nds.cpu7().state().r[0] = 0x0380'0700u;
     nds.arm7_bus().write16(0x0380'0702u, 0x8000u);
 
-    run_one(nds, kBase,
-            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/1, /*L*/1,
-                                /*Rn*/0, /*Rd*/0, kSHsh, /*off*/2));
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 1,
+                                /*L*/ 1,
+                                /*Rn*/ 0,
+                                /*Rd*/ 0,
+                                kSHsh,
+                                /*off*/ 2));
 
-    REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'8000u);   // sign-extended
-    REQUIRE(nds.cpu7().state().r[0] != 0x0380'0702u);   // writeback suppressed
+    REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'8000u); // sign-extended
+    REQUIRE(nds.cpu7().state().r[0] != 0x0380'0702u); // writeback suppressed
 }
 
 // STRH R0, [R0, #4]!  — counter-example: stores write Rd's pre-writeback
@@ -695,12 +983,99 @@ static void test_strh_rn_eq_rd_writeback_proceeds_normally() {
     NDS nds;
     nds.cpu7().state().r[0] = 0x0380'0800u;
 
-    run_one(nds, kBase,
-            encode_halfword_imm(kCondAL, /*P*/1, /*U*/1, /*W*/1, /*L*/0,
-                                /*Rn*/0, /*Rd*/0, kSHhalf, /*off*/4));
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 1,
+                                /*L*/ 0,
+                                /*Rn*/ 0,
+                                /*Rd*/ 0,
+                                kSHhalf,
+                                /*off*/ 4));
 
-    REQUIRE(nds.arm7_bus().read16(0x0380'0804u) == 0x0800u);  // low 16 of old R0
-    REQUIRE(nds.cpu7().state().r[0] == 0x0380'0804u);          // writeback fired
+    REQUIRE(nds.arm7_bus().read16(0x0380'0804u) == 0x0800u); // low 16 of old R0
+    REQUIRE(nds.cpu7().state().r[0] == 0x0380'0804u);        // writeback fired
+}
+
+// ---- Rd == R15 as load destination (UNPREDICTABLE, warn + word-align) ----
+//
+// Per §5.6 of the slice 3b3 design: on a halfword load with Rd == 15, ARM7TDMI
+// documents the behavior as UNPREDICTABLE. The emulator matches the house
+// write_rd() helper convention: the loaded value is written to R15 and state.pc
+// is masked to word alignment (value & ~0x3u). CPSR.T is left unchanged
+// (ARMv4 does not interpret bit 0 of the loaded PC as an interworking flag —
+// GBATEK: "LDR PC,<op> on ARMv4 leaves CPSR.T unchanged"). The three load
+// variants share the same write_rd_and_writeback path, so each needs a test
+// to guard against a future regression in one variant.
+
+// LDRH PC, [R0]  — loaded halfword 0x0005 word-aligns to 0x0004.
+static void test_ldrh_rd_eq_r15_writes_pc_word_aligned() {
+    NDS nds;
+    nds.cpu7().state().r[0] = 0x0380'0900u;
+    nds.arm7_bus().write16(0x0380'0900u, 0x0005u); // low bits set
+
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 1,
+                                /*Rn*/ 0,
+                                /*Rd*/ 15,
+                                kSHhalf,
+                                /*off*/ 0));
+
+    REQUIRE(nds.cpu7().state().pc == 0x0000'0004u);   // word-aligned target
+    REQUIRE(nds.cpu7().state().r[0] == 0x0380'0900u); // Rn untouched
+}
+
+// LDRSB PC, [R0]  — sign-extended byte 0xFF -> 0xFFFFFFFF, word-aligns to
+// 0xFFFFFFFC.
+static void test_ldrsb_rd_eq_r15_writes_pc_word_aligned() {
+    NDS nds;
+    nds.cpu7().state().r[0] = 0x0380'0A00u;
+    nds.arm7_bus().write8(0x0380'0A00u, 0xFFu);
+
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 1,
+                                /*Rn*/ 0,
+                                /*Rd*/ 15,
+                                kSHsb,
+                                /*off*/ 0));
+
+    REQUIRE(nds.cpu7().state().pc == 0xFFFF'FFFCu);   // sign-ext & ~3
+    REQUIRE(nds.cpu7().state().r[0] == 0x0380'0A00u); // Rn untouched
+}
+
+// LDRSH PC, [R0]  — sign-extended halfword 0x8003 -> 0xFFFF8003, word-aligns
+// to 0xFFFF8000.
+static void test_ldrsh_rd_eq_r15_writes_pc_word_aligned() {
+    NDS nds;
+    nds.cpu7().state().r[0] = 0x0380'0B00u;
+    nds.arm7_bus().write16(0x0380'0B00u, 0x8003u);
+
+    run_one(nds,
+            kBase,
+            encode_halfword_imm(kCondAL,
+                                /*P*/ 1,
+                                /*U*/ 1,
+                                /*W*/ 0,
+                                /*L*/ 1,
+                                /*Rn*/ 0,
+                                /*Rd*/ 15,
+                                kSHsh,
+                                /*off*/ 0));
+
+    REQUIRE(nds.cpu7().state().pc == 0xFFFF'8000u);   // sign-ext & ~3
+    REQUIRE(nds.cpu7().state().r[0] == 0x0380'0B00u); // Rn untouched
 }
 
 int main() {
@@ -747,6 +1122,10 @@ int main() {
     test_ldrsb_rn_eq_rd_writeback_suppressed();
     test_ldrsh_rn_eq_rd_writeback_suppressed();
     test_strh_rn_eq_rd_writeback_proceeds_normally();
+
+    test_ldrh_rd_eq_r15_writes_pc_word_aligned();
+    test_ldrsb_rd_eq_r15_writes_pc_word_aligned();
+    test_ldrsh_rd_eq_r15_writes_pc_word_aligned();
 
     std::puts("arm7_halfword_test: all LDRH, STRH, LDRSB, and LDRSH cases passed");
     return 0;
