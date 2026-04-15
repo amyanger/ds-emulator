@@ -8,6 +8,7 @@ add_library(ds_core STATIC
     cpu/arm9/arm9.cpp
     cpu/arm7/arm7.cpp
     cpu/arm7/arm7_decode.cpp
+    cpu/arm7/arm7_decode_000.cpp
     cpu/arm7/arm7_dp.cpp
     cpu/arm7/arm7_branch.cpp
     cpu/arm7/arm7_loadstore.cpp

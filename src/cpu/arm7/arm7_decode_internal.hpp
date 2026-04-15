@@ -35,37 +35,39 @@ inline u32 read_rm_pc12(const Arm7State& s, u32 rm) {
 // and return PC + 12 for determinism. Games do not use this form.
 inline u32 read_rs_for_reg_shift(const Arm7State& s, u32 rs) {
     if (rs == 15) {
-        DS_LOG_WARN("arm7: reg-shift DP with Rs == 15 (unpredictable) at PC 0x%08X",
-                    s.pc);
+        DS_LOG_WARN("arm7: reg-shift DP with Rs == 15 (unpredictable) at PC 0x%08X", s.pc);
     }
     return (rs == 15) ? (s.r[15] + 4) : s.r[rs];
 }
 
 // Family dispatch helpers. Each returns the number of ARM7 cycles the
 // instruction consumed. In slice 3b1 every path returns 1.
-u32 dispatch_dp(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr);
+u32 dispatch_dp(Arm7State& state, u32 instr, u32 instr_addr);
 u32 dispatch_branch(Arm7State& state, u32 instr);
 u32 dispatch_single_data_transfer(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr);
 
-// Multiply family dispatcher. Called from the top of dispatch_dp before
-// any DP operand decoding. The first thing it does is pattern-check
-// (instr & 0x0F0000F0) == 0x00000090; if that fails the caller should
-// treat the instruction as normal DP. In slice 3b2 Task 5, the long-form
-// variants (UMULL/UMLAL/SMULL/SMLAL) are stubbed with a warn — they are
-// filled in by Task 6 / Task 7.
+// Fan-out for the bits[27:25] == 000 encoding neighborhood. Checks BX,
+// multiply, halfword / signed data transfer, and PSR transfer (MRS / MSR)
+// in that order; falls through to dispatch_dp() for any operand-form DP
+// instruction that didn't match a recognizer. The bits[27:25] == 001
+// (imm-form DP) slot is routed directly to dispatch_dp() from
+// arm7_decode.cpp and does not pass through here.
+u32 dispatch_000_space(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr);
+
+// Multiply family dispatcher. Called from dispatch_000_space after the
+// multiply recognizer matches ((instr & 0x0F0000F0) == 0x00000090).
 u32 dispatch_multiply(Arm7State& state, u32 instr, u32 instr_addr);
 
-// PSR transfer (MRS / MSR) dispatcher. Called from the top of dispatch_dp
-// before the multiply recognizer. Handles both CPSR and SPSR forms; the
-// caller has already confirmed the pattern matches one of the three
-// PSR-transfer encoding shapes (MRS, MSR reg form, MSR imm form).
+// PSR transfer (MRS / MSR) dispatcher. Called from dispatch_000_space for
+// MRS and MSR-reg, and from dispatch_dp for MSR-imm. Handles both CPSR and
+// SPSR forms; the caller has already confirmed the encoding shape.
 u32 dispatch_psr_transfer(Arm7State& state, u32 instr, u32 instr_addr);
 
 // Halfword / signed data transfer dispatch entry point.
-// Called from dispatch_dp after the halfword recognizer matches.
+// Called from dispatch_000_space after the halfword recognizer matches.
 // Handles LDRH, STRH, LDRSB, LDRSH. Warns on LDRD/STRD/SWP slots and
 // on malformed encodings per GBATEK §"ARM Memory: Halfword, Doubleword,
 // and Signed Data Transfer".
 u32 dispatch_halfword(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr);
 
-}  // namespace ds
+} // namespace ds
