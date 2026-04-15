@@ -8,6 +8,7 @@
 
 #include "bus/arm7_bus.hpp"
 #include "cpu/arm7/arm7.hpp"
+#include "cpu/arm7/arm7_block_internal.hpp"
 #include "cpu/arm7/arm7_state.hpp"
 #include "nds.hpp"
 #include "require.hpp"
@@ -101,9 +102,147 @@ static void test_dispatch_block_stub_stmia_does_not_crash() {
     require_regs_unchanged(before, nds.cpu7().state());
 }
 
+// Direct-call tests for the addressing-mode normalization helpers in
+// arm7_block_internal.hpp. These cover every row of the §5.4 table and
+// the §5.8 empty-list case without standing up an NDS harness. Commit 5
+// will wire compute_block_addressing into dispatch_block; for now we
+// only verify that the helper math is correct in isolation.
+static void test_block_addressing_helpers() {
+    using ds::arm7_block_detail::compute_block_addressing;
+    using ds::arm7_block_detail::reg_list_count;
+
+    // --- Empty register list (n == 0) ---
+    //
+    // Spec §5.8: the helper produces wb_value == Rn because the loop is
+    // effectively a no-op. start_addr == Rn for every mode except IB,
+    // which adds +4 up front per §4.3.
+    {
+        const u32 rn = 0x0200'1000u;
+
+        // IA  (P=0, U=1)
+        auto a = compute_block_addressing(rn, 0x0000u, /*p=*/false, /*u=*/true);
+        REQUIRE(a.start_addr == rn);
+        REQUIRE(a.wb_value == rn);
+
+        // IB  (P=1, U=1)
+        a = compute_block_addressing(rn, 0x0000u, /*p=*/true, /*u=*/true);
+        REQUIRE(a.start_addr == rn + 4u);
+        REQUIRE(a.wb_value == rn);
+
+        // DA  (P=0, U=0). With n=0 the formula degenerates to
+        // start = Rn - 0 + 4 = Rn + 4. The empty-list path is a warned
+        // no-op (spec §5.8), so the exact start address is never
+        // observed by the transfer loop — we only pin the value the
+        // helper produces so future refactors stay deterministic.
+        a = compute_block_addressing(rn, 0x0000u, /*p=*/false, /*u=*/false);
+        REQUIRE(a.start_addr == rn + 4u);
+        REQUIRE(a.wb_value == rn);
+
+        // DB  (P=1, U=0). start = Rn - 0 + 0 = Rn.
+        a = compute_block_addressing(rn, 0x0000u, /*p=*/true, /*u=*/false);
+        REQUIRE(a.start_addr == rn);
+        REQUIRE(a.wb_value == rn);
+    }
+
+    // --- Single register (n == 1), Rn = 0x2000, reg_list = {R1} ---
+    // Values taken directly from the §5.4 addressing-mode table.
+    {
+        const u32 rn = 0x0000'2000u;
+        const u32 list = 0x0002u;
+
+        // IA: start = Rn, wb = Rn + 4
+        auto a = compute_block_addressing(rn, list, /*p=*/false, /*u=*/true);
+        REQUIRE(a.start_addr == 0x0000'2000u);
+        REQUIRE(a.wb_value == 0x0000'2004u);
+
+        // IB: start = Rn + 4, wb = Rn + 4
+        a = compute_block_addressing(rn, list, /*p=*/true, /*u=*/true);
+        REQUIRE(a.start_addr == 0x0000'2004u);
+        REQUIRE(a.wb_value == 0x0000'2004u);
+
+        // DA: start = Rn - 4*(n-1) = Rn, wb = Rn - 4*n = Rn - 4
+        a = compute_block_addressing(rn, list, /*p=*/false, /*u=*/false);
+        REQUIRE(a.start_addr == 0x0000'2000u);
+        REQUIRE(a.wb_value == 0x0000'1FFCu);
+
+        // DB: start = Rn - 4*n = Rn - 4, wb = Rn - 4*n = Rn - 4
+        a = compute_block_addressing(rn, list, /*p=*/true, /*u=*/false);
+        REQUIRE(a.start_addr == 0x0000'1FFCu);
+        REQUIRE(a.wb_value == 0x0000'1FFCu);
+    }
+
+    // --- Three registers (n == 3), Rn = 0x2000, reg_list = {R1,R2,R3} ---
+    {
+        const u32 rn = 0x0000'2000u;
+        const u32 list = 0x000Eu;
+
+        // IA: start = Rn, wb = Rn + 12
+        auto a = compute_block_addressing(rn, list, /*p=*/false, /*u=*/true);
+        REQUIRE(a.start_addr == 0x0000'2000u);
+        REQUIRE(a.wb_value == 0x0000'200Cu);
+
+        // IB: start = Rn + 4, wb = Rn + 12
+        a = compute_block_addressing(rn, list, /*p=*/true, /*u=*/true);
+        REQUIRE(a.start_addr == 0x0000'2004u);
+        REQUIRE(a.wb_value == 0x0000'200Cu);
+
+        // DA: start = Rn - 4*(n-1) = Rn - 8, wb = Rn - 12
+        a = compute_block_addressing(rn, list, /*p=*/false, /*u=*/false);
+        REQUIRE(a.start_addr == 0x0000'1FF8u);
+        REQUIRE(a.wb_value == 0x0000'1FF4u);
+
+        // DB: start = Rn - 12, wb = Rn - 12
+        a = compute_block_addressing(rn, list, /*p=*/true, /*u=*/false);
+        REQUIRE(a.start_addr == 0x0000'1FF4u);
+        REQUIRE(a.wb_value == 0x0000'1FF4u);
+    }
+
+    // --- All 16 registers (n == 16), Rn = 0x2000, reg_list = 0xFFFF ---
+    {
+        const u32 rn = 0x0000'2000u;
+        const u32 list = 0xFFFFu;
+
+        // IA: start = Rn, wb = Rn + 64
+        auto a = compute_block_addressing(rn, list, /*p=*/false, /*u=*/true);
+        REQUIRE(a.start_addr == 0x0000'2000u);
+        REQUIRE(a.wb_value == 0x0000'2040u);
+
+        // DB: start = Rn - 64, wb = Rn - 64
+        a = compute_block_addressing(rn, list, /*p=*/true, /*u=*/false);
+        REQUIRE(a.start_addr == 0x0000'1FC0u);
+        REQUIRE(a.wb_value == 0x0000'1FC0u);
+    }
+
+    // --- Wraparound: Rn near 2^32, single register ---
+    // All arithmetic is u32-wrapping; these cases verify the helper does
+    // not assume non-overflowing inputs.
+    {
+        const u32 rn = 0xFFFF'FFFCu;
+        const u32 list = 0x0002u;
+
+        // IA: start = Rn, wb = Rn + 4 = 0 (wraps)
+        auto a = compute_block_addressing(rn, list, /*p=*/false, /*u=*/true);
+        REQUIRE(a.start_addr == 0xFFFF'FFFCu);
+        REQUIRE(a.wb_value == 0x0000'0000u);
+
+        // IB: start = Rn + 4 = 0, wb = Rn + 4 = 0
+        a = compute_block_addressing(rn, list, /*p=*/true, /*u=*/true);
+        REQUIRE(a.start_addr == 0x0000'0000u);
+        REQUIRE(a.wb_value == 0x0000'0000u);
+    }
+
+    // --- popcount smoke test ---
+    REQUIRE(reg_list_count(0x0000u) == 0u);
+    REQUIRE(reg_list_count(0x8001u) == 2u);
+    REQUIRE(reg_list_count(0xFFFFu) == 16u);
+    // Bits above bit 15 must be ignored (the encoded field is 16 bits).
+    REQUIRE(reg_list_count(0xFFFF'0000u) == 0u);
+}
+
 int main() {
     test_dispatch_block_stub_ldmia_does_not_crash();
     test_dispatch_block_stub_stmia_does_not_crash();
+    test_block_addressing_helpers();
 
     std::puts("arm7_block_test: dispatch_block stub wiring verified");
     return 0;
