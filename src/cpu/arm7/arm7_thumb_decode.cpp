@@ -36,7 +36,11 @@ u32 dispatch_thumb_010_space(
         // THUMB.5: 010001 op2 Hd Hs Rs3 Rd3
         return dispatch_thumb_hireg_bx(state, bus, instr, instr_addr, pc_read, pc_literal);
     }
-    // THUMB.6, .7, .8 — stubs until their commits land.
+    if ((instr & 0xF800u) == 0x4800u) {
+        // THUMB.6: 01001 Rd3 imm8 — LDR PC-rel
+        return dispatch_thumb_ldr_pc(state, bus, instr, instr_addr, pc_read, pc_literal);
+    }
+    // THUMB.7, .8 — stubs until their commits land.
     DS_LOG_WARN("arm7/thumb: 010_space stub instr=0x%04X at 0x%08X", instr, instr_addr);
     return 1;
 }
@@ -48,7 +52,12 @@ u32 dispatch_thumb_ldst_imm_wb(
 }
 
 u32 dispatch_thumb_100_space(
-    Arm7State&, Arm7Bus&, u16 instr, u32 instr_addr, u32 /*pc_read*/, u32 /*pc_literal*/) {
+    Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal) {
+    if ((instr & 0xF000u) == 0x9000u) {
+        // THUMB.11: 1001 op1 Rd3 imm8 — LDR/STR SP-rel
+        return dispatch_thumb_ldst_sp(state, bus, instr, instr_addr, pc_read, pc_literal);
+    }
+    // THUMB.10 — stub until its commit lands.
     DS_LOG_WARN("arm7/thumb: 100_space stub instr=0x%04X at 0x%08X", instr, instr_addr);
     return 1;
 }

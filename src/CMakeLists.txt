@@ -19,6 +19,7 @@ add_library(ds_core STATIC
     cpu/arm7/arm7_swap.cpp
     cpu/arm7/arm7_thumb_decode.cpp
     cpu/arm7/arm7_thumb_dp.cpp
+    cpu/arm7/arm7_thumb_ls.cpp
 )
 target_include_directories(ds_core
     PUBLIC  ${CMAKE_SOURCE_DIR}/include

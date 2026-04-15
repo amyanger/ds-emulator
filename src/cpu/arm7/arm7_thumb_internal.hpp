@@ -38,6 +38,16 @@ u32 dispatch_thumb_alu(
 // Defined in arm7_thumb_dp.cpp.
 u32 dispatch_thumb_hireg_bx(
     Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
+
+// THUMB.6 LDR PC-relative (literal pool load).
+// Defined in arm7_thumb_ls.cpp.
+u32 dispatch_thumb_ldr_pc(
+    Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
+
+// THUMB.11 LDR/STR SP-relative.
+// Defined in arm7_thumb_ls.cpp.
+u32 dispatch_thumb_ldst_sp(
+    Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
 u32 dispatch_thumb_ldst_imm_wb(
     Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
 u32 dispatch_thumb_100_space(
