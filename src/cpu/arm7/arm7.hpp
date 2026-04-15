@@ -17,7 +17,7 @@ public:
     void reset() override;
 
     // Test access.
-    Arm7State&       state()       { return state_; }
+    Arm7State& state() { return state_; }
     const Arm7State& state() const { return state_; }
 
 private:
@@ -25,8 +25,12 @@ private:
     // (= instruction_addr + 8), and execute. Defined in arm7_decode.cpp.
     void step_arm();
 
+    // Fetch one Thumb instruction at pc, advance pc by 2, set R15 to pc_+4
+    // (= instruction_addr + 4), and execute. Defined in arm7_thumb_decode.cpp.
+    void step_thumb();
+
     Arm7State state_{};
-    Arm7Bus*  bus_ = nullptr;
+    Arm7Bus* bus_ = nullptr;
 };
 
-}  // namespace ds
+} // namespace ds

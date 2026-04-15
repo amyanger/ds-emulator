@@ -15,8 +15,12 @@ void Arm7::reset() {
 void Arm7::run_until(Cycle arm9_target) {
     const Cycle arm7_target = arm9_target / 2;
     while (state_.cycles < arm7_target) {
-        step_arm();
+        if (state_.cpsr & (1u << 5)) {
+            step_thumb();
+        } else {
+            step_arm();
+        }
     }
 }
 
-}  // namespace ds
+} // namespace ds

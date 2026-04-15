@@ -51,7 +51,7 @@ u32 dispatch_arm(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
 
 void Arm7::step_arm() {
     assert((state_.pc & 0x3u) == 0 && "Arm7::step_arm: ARM pc must be 4-aligned");
-    assert((state_.cpsr & (1u << 5)) == 0 && "Arm7::step_arm: Thumb mode not implemented");
+    assert((state_.cpsr & (1u << 5)) == 0 && "Arm7::step_arm requires CPSR.T=0");
 
     const u32 instr_addr = state_.pc;
     const u32 instr = bus_->read32(instr_addr);
