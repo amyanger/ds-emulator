@@ -70,6 +70,19 @@ u32 execute_dp_op(Arm7State& state,
 // upcoming Thumb BX handler (slice 3c).
 u32 execute_bx(Arm7State& state, u32 rm_value);
 
+// Shared ARMv4T LDR/STR word/byte executor. Caller pre-computes the
+// access address and passes in is_load/is_byte flags. Handles rotate-
+// on-unaligned LDR, STR-of-R15 reading instr_addr+12, and the Rd
+// writeback on load. Rn base writeback is NOT done here — the caller
+// handles it with its own addressing-mode rules.
+u32 execute_single_data_transfer_core(Arm7State& state,
+                                      Arm7Bus& bus,
+                                      u32 access_addr,
+                                      u32 rd,
+                                      bool is_load,
+                                      bool is_byte,
+                                      u32 instr_addr);
+
 u32 dispatch_branch(Arm7State& state, u32 instr);
 u32 dispatch_single_data_transfer(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr);
 

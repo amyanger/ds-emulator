@@ -10,6 +10,33 @@
 
 namespace ds {
 
+u32 execute_single_data_transfer_core(Arm7State& state,
+                                      Arm7Bus& bus,
+                                      u32 access_addr,
+                                      u32 rd,
+                                      bool is_load,
+                                      bool is_byte,
+                                      u32 instr_addr) {
+    if (is_load) {
+        u32 loaded;
+        if (is_byte) {
+            loaded = bus.read8(access_addr);
+        } else {
+            const u32 raw = bus.read32(access_addr & ~0x3u);
+            loaded = rotate_read_word(raw, access_addr);
+        }
+        write_rd(state, rd, loaded);
+    } else {
+        const u32 stored = (rd == 15) ? (instr_addr + 12u) : state.r[rd];
+        if (is_byte) {
+            bus.write8(access_addr, static_cast<u8>(stored & 0xFFu));
+        } else {
+            bus.write32(access_addr & ~0x3u, stored);
+        }
+    }
+    return 1;
+}
+
 u32 dispatch_single_data_transfer(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
     const bool i_bit = ((instr >> 25) & 1u) != 0;
     const bool p_bit = ((instr >> 24) & 1u) != 0;
@@ -43,33 +70,15 @@ u32 dispatch_single_data_transfer(Arm7State& state, Arm7Bus& bus, u32 instr, u32
     const u32 wb_addr = pre_addr; // same whether P=1 or P=0
 
     // Access.
-    u32 loaded = 0;
-    if (l_bit) {
-        if (b_bit) {
-            loaded = bus.read8(access_addr); // zero-extended
-        } else {
-            const u32 raw = bus.read32(access_addr & ~0x3u);
-            loaded = rotate_read_word(raw, access_addr);
-        }
-    } else {
-        const u32 stored = (rd == 15) ? (instr_addr + 12u) : state.r[rd];
-        if (b_bit) {
-            bus.write8(access_addr, static_cast<u8>(stored & 0xFFu));
-        } else {
-            bus.write32(access_addr & ~0x3u, stored);
-        }
-    }
+    execute_single_data_transfer_core(state, bus, access_addr, rd, l_bit, b_bit, instr_addr);
 
-    // Writeback: post-index always writes back; pre-index writes back
-    // only if W=1. On LDR, the loaded value wins over writeback when
-    // Rn == Rd (ARMv4T defines this as the rule for that "unpredictable"
-    // case).
+    // Rn writeback: post-index always writes back; pre-index writes
+    // back only if W=1. On LDR, Rd writeback has already landed in the
+    // core, so suppress Rn writeback when Rn == Rd to let the loaded
+    // value win (ARMv4T rule for the "unpredictable" case).
     const bool do_wb = (!p_bit) || w_bit;
     if (do_wb && !(l_bit && rn == rd)) {
         write_rd(state, rn, wb_addr);
-    }
-    if (l_bit) {
-        write_rd(state, rd, loaded);
     }
 
     return 1;
