@@ -11,29 +11,116 @@
 
 namespace ds {
 
-namespace {
+u32 execute_dp_op(Arm7State& state,
+                  DpOp op,
+                  u32 rn_value,
+                  u32 operand2,
+                  bool shifter_carry,
+                  bool s_flag,
+                  u32 rd,
+                  u32 instr_addr) {
+    u32 result = 0;
+    bool logical_form = true;
+    bool writeback = true;
+    AddResult ar{0, false, false};
 
-// Data-processing opcode numbers (bits 24..21 of the instruction).
-enum class DpOp : u8 {
-    AND = 0x0,
-    EOR = 0x1,
-    SUB = 0x2,
-    RSB = 0x3,
-    ADD = 0x4,
-    ADC = 0x5,
-    SBC = 0x6,
-    RSC = 0x7,
-    TST = 0x8,
-    TEQ = 0x9,
-    CMP = 0xA,
-    CMN = 0xB,
-    ORR = 0xC,
-    MOV = 0xD,
-    BIC = 0xE,
-    MVN = 0xF,
-};
+    switch (op) {
+    case DpOp::AND:
+        result = rn_value & operand2;
+        break;
+    case DpOp::EOR:
+        result = rn_value ^ operand2;
+        break;
+    case DpOp::SUB:
+        ar = sbc(rn_value, operand2, true);
+        result = ar.value;
+        logical_form = false;
+        break;
+    case DpOp::RSB:
+        ar = sbc(operand2, rn_value, true);
+        result = ar.value;
+        logical_form = false;
+        break;
+    case DpOp::ADD:
+        ar = adc(rn_value, operand2, false);
+        result = ar.value;
+        logical_form = false;
+        break;
+    case DpOp::ADC: {
+        const bool c = (state.cpsr & (1u << 29)) != 0;
+        ar = adc(rn_value, operand2, c);
+        result = ar.value;
+        logical_form = false;
+        break;
+    }
+    case DpOp::SBC: {
+        const bool c = (state.cpsr & (1u << 29)) != 0;
+        ar = sbc(rn_value, operand2, c);
+        result = ar.value;
+        logical_form = false;
+        break;
+    }
+    case DpOp::RSC: {
+        const bool c = (state.cpsr & (1u << 29)) != 0;
+        ar = sbc(operand2, rn_value, c);
+        result = ar.value;
+        logical_form = false;
+        break;
+    }
+    case DpOp::ORR:
+        result = rn_value | operand2;
+        break;
+    case DpOp::MOV:
+        result = operand2;
+        break;
+    case DpOp::BIC:
+        result = rn_value & ~operand2;
+        break;
+    case DpOp::MVN:
+        result = ~operand2;
+        break;
+    case DpOp::TST:
+        result = rn_value & operand2;
+        writeback = false;
+        break;
+    case DpOp::TEQ:
+        result = rn_value ^ operand2;
+        writeback = false;
+        break;
+    case DpOp::CMP:
+        ar = sbc(rn_value, operand2, true);
+        result = ar.value;
+        logical_form = false;
+        writeback = false;
+        break;
+    case DpOp::CMN:
+        ar = adc(rn_value, operand2, false);
+        result = ar.value;
+        logical_form = false;
+        writeback = false;
+        break;
+    }
 
-} // namespace
+    if (writeback) {
+        write_rd(state, rd, result);
+    }
+
+    if (s_flag) {
+        if (rd == 15 && writeback) {
+            DS_LOG_WARN("arm7: S-flag set with Rd=R15 at 0x%08X", instr_addr);
+        } else {
+            state.cpsr = set_nz(state.cpsr, result);
+            if (logical_form) {
+                state.cpsr = set_c(state.cpsr, shifter_carry);
+            } else {
+                state.cpsr = set_c(state.cpsr, ar.carry);
+                state.cpsr = set_v(state.cpsr, ar.overflow);
+            }
+        }
+    }
+
+    return 1;
+}
 
 u32 dispatch_dp(Arm7State& state, u32 instr, u32 instr_addr) {
     // MSR imm-form lives in the bits[27:25]==001 slot and is routed directly
@@ -85,107 +172,8 @@ u32 dispatch_dp(Arm7State& state, u32 instr, u32 instr_addr) {
     // offset as Rm). In imm-shift and imm-form it reads PC + 8 as usual.
     const u32 rn_val = reg_shift ? read_rm_pc12(state, rn) : state.r[rn];
 
-    u32 result = 0;
-    bool logical_form = true;
-    bool writeback = true;
-    AddResult ar{0, false, false};
-
-    switch (static_cast<DpOp>(opcode)) {
-    case DpOp::AND:
-        result = rn_val & op2.value;
-        break;
-    case DpOp::EOR:
-        result = rn_val ^ op2.value;
-        break;
-    case DpOp::SUB:
-        ar = sbc(rn_val, op2.value, true);
-        result = ar.value;
-        logical_form = false;
-        break;
-    case DpOp::RSB:
-        ar = sbc(op2.value, rn_val, true);
-        result = ar.value;
-        logical_form = false;
-        break;
-    case DpOp::ADD:
-        ar = adc(rn_val, op2.value, false);
-        result = ar.value;
-        logical_form = false;
-        break;
-    case DpOp::ADC: {
-        const bool c = (state.cpsr & (1u << 29)) != 0;
-        ar = adc(rn_val, op2.value, c);
-        result = ar.value;
-        logical_form = false;
-        break;
-    }
-    case DpOp::SBC: {
-        const bool c = (state.cpsr & (1u << 29)) != 0;
-        ar = sbc(rn_val, op2.value, c);
-        result = ar.value;
-        logical_form = false;
-        break;
-    }
-    case DpOp::RSC: {
-        const bool c = (state.cpsr & (1u << 29)) != 0;
-        ar = sbc(op2.value, rn_val, c);
-        result = ar.value;
-        logical_form = false;
-        break;
-    }
-    case DpOp::ORR:
-        result = rn_val | op2.value;
-        break;
-    case DpOp::MOV:
-        result = op2.value;
-        break;
-    case DpOp::BIC:
-        result = rn_val & ~op2.value;
-        break;
-    case DpOp::MVN:
-        result = ~op2.value;
-        break;
-    case DpOp::TST:
-        result = rn_val & op2.value;
-        writeback = false;
-        break;
-    case DpOp::TEQ:
-        result = rn_val ^ op2.value;
-        writeback = false;
-        break;
-    case DpOp::CMP:
-        ar = sbc(rn_val, op2.value, true);
-        result = ar.value;
-        logical_form = false;
-        writeback = false;
-        break;
-    case DpOp::CMN:
-        ar = adc(rn_val, op2.value, false);
-        result = ar.value;
-        logical_form = false;
-        writeback = false;
-        break;
-    }
-
-    if (writeback) {
-        write_rd(state, rd, result);
-    }
-
-    if (s_flag) {
-        if (rd == 15 && writeback) {
-            DS_LOG_WARN("arm7: S-flag set with Rd=R15 at 0x%08X", instr_addr);
-        } else {
-            state.cpsr = set_nz(state.cpsr, result);
-            if (logical_form) {
-                state.cpsr = set_c(state.cpsr, op2.carry);
-            } else {
-                state.cpsr = set_c(state.cpsr, ar.carry);
-                state.cpsr = set_v(state.cpsr, ar.overflow);
-            }
-        }
-    }
-
-    return 1;
+    return execute_dp_op(
+        state, static_cast<DpOp>(opcode), rn_val, op2.value, op2.carry, s_flag, rd, instr_addr);
 }
 
 } // namespace ds

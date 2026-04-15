@@ -5,6 +5,7 @@
 // NOT part of any public include path. Only files under src/cpu/arm7/
 // may include it.
 
+#include "cpu/arm7/arm7_alu.hpp"
 #include "cpu/arm7/arm7_state.hpp"
 #include "ds/common.hpp"
 
@@ -51,6 +52,19 @@ inline u32 rotate_read_word(u32 raw, u32 addr) {
 // Family dispatch helpers. Each returns the number of ARM7 cycles the
 // instruction consumed. In slice 3b1 every path returns 1.
 u32 dispatch_dp(Arm7State& state, u32 instr, u32 instr_addr);
+
+// Shared ARMv4T data-processing executor. Callers pre-materialize all
+// operands (including any PC pipeline offset on rn_value) so the same
+// body serves ARM-state dispatch_dp and the Thumb DP handlers.
+u32 execute_dp_op(Arm7State& state,
+                  DpOp op,
+                  u32 rn_value,
+                  u32 operand2,
+                  bool shifter_carry,
+                  bool s_flag,
+                  u32 rd,
+                  u32 instr_addr);
+
 u32 dispatch_branch(Arm7State& state, u32 instr);
 u32 dispatch_single_data_transfer(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr);
 
