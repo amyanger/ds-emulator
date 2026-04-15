@@ -19,11 +19,8 @@
 
 namespace ds {
 
-u32 dispatch_thumb_shift_or_addsub(
-    Arm7State&, Arm7Bus&, u16 instr, u32 instr_addr, u32 /*pc_read*/, u32 /*pc_literal*/) {
-    DS_LOG_WARN("arm7/thumb: shift_or_addsub stub instr=0x%04X at 0x%08X", instr, instr_addr);
-    return 1;
-}
+// dispatch_thumb_shift_or_addsub — THUMB.1 shift imm + THUMB.2 add/sub.
+// Defined in arm7_thumb_dp.cpp.
 
 // dispatch_thumb_imm_dp — THUMB.3 MOV/CMP/ADD/SUB imm8.
 // Defined in arm7_thumb_dp.cpp.

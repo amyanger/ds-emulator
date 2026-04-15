@@ -1,27 +1,50 @@
 // arm7_thumb_dp.cpp — Thumb data-processing format handlers.
-// Slice 3c commit 8: THUMB.3 MOV/CMP/ADD/SUB imm8.
 //
-// THUMB.3 encoding: 001 op2 Rd3 imm8
-//   op (bits[12:11]): 00=MOV, 01=CMP, 10=ADD, 11=SUB
-//   Rd: bits[10:8] (R0-R7 only)
-//   imm8: bits[7:0] (0..255, zero-extended)
+// THUMB.1 (shift imm): barrel_shift_imm + execute_dp_op(MOV). The
+//   barrel shifter already handles the ARMv4T zero-amount quirks:
+//   LSL #0 = no shift, C unchanged; LSR/ASR #0 = shift by 32.
+//   Flags: NZC updated (V unchanged). C unchanged for LSL #0.
 //
-// Flag rules (GBATEK):
-//   MOV: N, Z only. C and V unchanged.
-//   CMP: full NZCV, no register writeback.
-//   ADD: full NZCV.
-//   SUB: full NZCV.
-//
-// MOV's NZ-only behavior falls out naturally from execute_dp_op: MOV is
-// a logical-form op, so execute_dp_op sets NZ + shifter_carry. By passing
-// shifter_carry = current_c, C is preserved. V is never touched for
-// logical-form ops.
+// THUMB.3 (imm8 DP): execute_dp_op with shifter_carry = current_c
+//   so MOV preserves C/V (logical-form path sets NZ + shifter_carry).
 
 #include "cpu/arm7/arm7_alu.hpp"
 #include "cpu/arm7/arm7_decode_internal.hpp"
 #include "cpu/arm7/arm7_thumb_internal.hpp"
 
 namespace ds {
+
+// ---- THUMB.1 + THUMB.2 bucket (bits[15:13] == 000) ----
+
+u32 dispatch_thumb_shift_or_addsub(Arm7State& state,
+                                   Arm7Bus& /*bus*/,
+                                   u16 instr,
+                                   u32 instr_addr,
+                                   u32 /*pc_read*/,
+                                   u32 /*pc_literal*/) {
+    const u32 op = (instr >> 11) & 0x3u;
+
+    if (op == 3) {
+        // THUMB.2 add/sub — lands in commit 10.
+        DS_LOG_WARN("arm7/thumb: THUMB.2 add/sub stub instr=0x%04X at 0x%08X", instr, instr_addr);
+        return 1;
+    }
+
+    // THUMB.1: 000 op2 off5 Rs3 Rd3
+    // op: 00=LSL, 01=LSR, 10=ASR
+    const u32 offset = (instr >> 6) & 0x1Fu;
+    const u32 rs = (instr >> 3) & 0x7u;
+    const u32 rd = instr & 0x7u;
+
+    const bool current_c = (state.cpsr & (1u << 29)) != 0;
+    const auto sr = barrel_shift_imm(state.r[rs], static_cast<ShiftType>(op), offset, current_c);
+
+    // Rd = shifted result, flags NZC (V unchanged).
+    // execute_dp_op(MOV) with s_flag=true sets NZ + shifter_carry. V untouched.
+    return execute_dp_op(state, DpOp::MOV, 0, sr.value, sr.carry, true, rd, instr_addr);
+}
+
+// ---- THUMB.3 (bits[15:13] == 001) ----
 
 u32 dispatch_thumb_imm_dp(Arm7State& state,
                           Arm7Bus& /*bus*/,

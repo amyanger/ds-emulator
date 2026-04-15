@@ -1,6 +1,6 @@
-// arm7_thumb_dp_test.cpp — THUMB.3 MOV/CMP/ADD/SUB imm8 tests.
-// Verifies encoding decode, register writeback, and flag behavior,
-// with particular attention to MOV's NZ-only flag rule (C/V preserved).
+// arm7_thumb_dp_test.cpp — THUMB.1 shift imm + THUMB.3 imm8 DP tests.
+// THUMB.1: LSL/LSR/ASR imm5 with ARMv4T zero-amount quirks.
+// THUMB.3: MOV/CMP/ADD/SUB imm8 with MOV NZ-only flag rule.
 
 #include "bus/arm7_bus.hpp"
 #include "cpu/arm7/arm7.hpp"
@@ -8,6 +8,11 @@
 #include "require.hpp"
 
 using namespace ds;
+
+// Encode THUMB.1: 000 op2 off5 Rs3 Rd3  (op: 0=LSL, 1=LSR, 2=ASR)
+static u16 thumb1(u32 op, u32 offset, u32 rs, u32 rd) {
+    return static_cast<u16>((op << 11) | (offset << 6) | (rs << 3) | rd);
+}
 
 // Encode THUMB.3: 001 op2 Rd3 imm8
 static u16 thumb3(u32 op, u32 rd, u32 imm8) {
@@ -38,6 +43,131 @@ static void step_one(NDS& nds) {
     const u64 before = nds.cpu7().state().cycles;
     nds.cpu7().run_until((before + 1) * 2);
 }
+
+// ==== THUMB.1 — shift imm ====
+
+static void thumb1_lsl_basic() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb1(0, 4, 1, 0)); // LSL R0, R1, #4
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[1] = 0x0000'000Fu;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 0x0000'00F0u);
+    REQUIRE(!flag_n(nds.cpu7().state().cpsr));
+    REQUIRE(!flag_z(nds.cpu7().state().cpsr));
+}
+
+static void thumb1_lsl_zero_no_shift_c_preserved() {
+    // LSL #0 = no shift, C flag unchanged.
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb1(0, 0, 2, 3)); // LSL R3, R2, #0
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[2] = 42;
+    nds.cpu7().state().cpsr |= (1u << 29); // C=1 before
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[3] == 42);
+    REQUIRE(flag_c(nds.cpu7().state().cpsr)); // C preserved
+}
+
+static void thumb1_lsl_zero_c_clear_preserved() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb1(0, 0, 4, 5)); // LSL R5, R4, #0
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[4] = 1;
+    nds.cpu7().state().cpsr &= ~(1u << 29); // C=0 before
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[5] == 1);
+    REQUIRE(!flag_c(nds.cpu7().state().cpsr)); // C preserved
+}
+
+static void thumb1_lsl_sets_c_from_last_shifted_out() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb1(0, 1, 0, 1)); // LSL R1, R0, #1
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 0x8000'0000u; // bit 31 set
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[1] == 0);
+    REQUIRE(flag_z(nds.cpu7().state().cpsr));
+    REQUIRE(flag_c(nds.cpu7().state().cpsr)); // bit 31 shifted out
+}
+
+static void thumb1_lsr_basic() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb1(1, 8, 0, 1)); // LSR R1, R0, #8
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 0xFF00u;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[1] == 0xFFu);
+}
+
+static void thumb1_lsr_zero_means_32() {
+    // LSR #0 encodes shift-by-32: result = 0, C = bit 31 of source.
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb1(1, 0, 3, 4)); // LSR R4, R3, #0 (=32)
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[3] = 0x8000'0001u;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[4] == 0);
+    REQUIRE(flag_z(nds.cpu7().state().cpsr));
+    REQUIRE(flag_c(nds.cpu7().state().cpsr)); // bit 31 was set
+}
+
+static void thumb1_lsr_zero_c_clear_when_bit31_clear() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb1(1, 0, 5, 6)); // LSR R6, R5, #0 (=32)
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[5] = 0x7FFF'FFFFu; // bit 31 clear
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[6] == 0);
+    REQUIRE(!flag_c(nds.cpu7().state().cpsr)); // bit 31 was clear
+}
+
+static void thumb1_asr_basic() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb1(2, 16, 0, 1)); // ASR R1, R0, #16
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 0xFFFF'0000u; // negative
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[1] == 0xFFFF'FFFFu); // sign-extended
+    REQUIRE(flag_n(nds.cpu7().state().cpsr));
+}
+
+static void thumb1_asr_zero_means_32_negative() {
+    // ASR #0 encodes shift-by-32: if negative, result = 0xFFFFFFFF, C = 1.
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb1(2, 0, 2, 3)); // ASR R3, R2, #0 (=32)
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[2] = 0x8000'0000u;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[3] == 0xFFFF'FFFFu);
+    REQUIRE(flag_n(nds.cpu7().state().cpsr));
+    REQUIRE(flag_c(nds.cpu7().state().cpsr));
+}
+
+static void thumb1_asr_zero_means_32_positive() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb1(2, 0, 4, 5)); // ASR R5, R4, #0 (=32)
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[4] = 0x7FFF'FFFFu;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[5] == 0);
+    REQUIRE(flag_z(nds.cpu7().state().cpsr));
+    REQUIRE(!flag_c(nds.cpu7().state().cpsr));
+}
+
+static void thumb1_v_flag_preserved() {
+    // All THUMB.1 ops leave V unchanged.
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb1(0, 4, 0, 1)); // LSL R1, R0, #4
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 1;
+    nds.cpu7().state().cpsr |= (1u << 28); // V=1 before
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[1] == 16);
+    REQUIRE(flag_v(nds.cpu7().state().cpsr)); // V preserved
+}
+
+// ==== THUMB.3 — MOV/CMP/ADD/SUB imm8 ====
 
 // ---- MOV ----
 
@@ -242,6 +372,20 @@ static void thumb3_sub_max_imm() {
 }
 
 int main() {
+    // THUMB.1
+    thumb1_lsl_basic();
+    thumb1_lsl_zero_no_shift_c_preserved();
+    thumb1_lsl_zero_c_clear_preserved();
+    thumb1_lsl_sets_c_from_last_shifted_out();
+    thumb1_lsr_basic();
+    thumb1_lsr_zero_means_32();
+    thumb1_lsr_zero_c_clear_when_bit31_clear();
+    thumb1_asr_basic();
+    thumb1_asr_zero_means_32_negative();
+    thumb1_asr_zero_means_32_positive();
+    thumb1_v_flag_preserved();
+
+    // THUMB.3
     thumb3_mov_basic();
     thumb3_mov_zero_sets_z_clears_n();
     thumb3_mov_preserves_c_and_v_when_set();
