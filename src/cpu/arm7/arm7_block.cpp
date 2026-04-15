@@ -5,15 +5,15 @@
 //
 // Commit 5 of slice 3b4 lit up the very first real execution path
 // through dispatch_block: plain `STM IA` with W=0, S=0, Rn not in list,
-// and R15 not in list. Commit 6 generalizes that gate into a single
-// "IA base case" predicate that covers the mirror LDM IA form — same
-// restrictions, same forward-walk addressing, just loads instead of
-// stores. Commit 7 drops the W=0 restriction for the Rn-not-in-list
-// case: when writeback is set, Rn is updated to wb_value after the
-// transfer completes. The Rn-in-list writeback rules from spec §5.5
-// remain gated out until commits 9 (STM) and 10 (LDM). Every other
-// encoding still falls through to the warn stub until its dedicated
-// commit wires it up.
+// and R15 not in list. Commit 6 generalized that to the mirror LDM IA
+// base case, commit 7 added writeback (W=1) for the Rn-not-in-list IA
+// path, and commit 8 now drops the IA-only restriction so all four
+// addressing modes (IA, IB, DA, DB) execute through the same
+// forward-walk engine. The §4.3 normalization in compute_block_addressing
+// means the transfer loop itself is mode-agnostic — only the start_addr
+// and wb_value change. The remaining constraints (no S-bit, non-empty
+// list, Rn not in list, R15 not in list) stay in place and are wired up
+// in their dedicated follow-up commits.
 
 #include "bus/arm7_bus.hpp"
 #include "cpu/arm7/arm7_block_internal.hpp"
@@ -63,17 +63,17 @@ u32 dispatch_block(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
     const u32 rn = (instr >> 16) & 0xFu;
     const u32 reg_list = instr & 0xFFFFu;
 
-    // IA base case implemented across commits 5–7: post-increment
-    // (P=0), up (U=1), no S-bit, non-empty list, Rn not in list, R15
-    // not in list. The L bit selects load vs store. W is free now that
-    // commit 7 wires up the (Rn-not-in-list) writeback path; the §5.5
-    // Rn-in-list writeback rules are still out of scope (commits 9 and
-    // 10). Every other encoding stays on the warn stub until its
-    // dedicated follow-up commit wires it up.
-    const bool is_base_case_ia = !s_bit && !p_bit && u_bit && reg_list != 0u &&
-                                 ((reg_list & (1u << rn)) == 0u) && ((reg_list & (1u << 15)) == 0u);
+    // Base case after commit 8: all four addressing modes (any {P, U}),
+    // either L value, free W, Rn not in list, R15 not in list, no S-bit,
+    // non-empty list. The §5.5 Rn-in-list writeback rules (commits 9/10),
+    // R15-in-list forms (commits 11/12), S=1 user-bank transfer (commit
+    // 13), LDM S=1 with R15 (commit 14), and the empty-list quirk
+    // (commit 15) still fall through to the warn stub below.
+    const bool is_base_case_any_mode = !s_bit && reg_list != 0u &&
+                                       ((reg_list & (1u << rn)) == 0u) &&
+                                       ((reg_list & (1u << 15)) == 0u);
 
-    if (!is_base_case_ia) {
+    if (!is_base_case_any_mode) {
         DS_LOG_WARN("arm7: LDM/STM path not yet implemented 0x%08X at 0x%08X", instr, instr_addr);
         return 1;
     }
@@ -83,10 +83,12 @@ u32 dispatch_block(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
 
     u32 addr = addressing.start_addr;
     if (l_bit) {
-        // LDM IA — load each listed register from [start_addr + 4*k].
-        // Per GBATEK / spec §4.4 LDM step 4, the effective address is
+        // LDM — load each listed register from [start_addr + 4*k]. Per
+        // GBATEK / spec §4.4 LDM step 4 the effective address is
         // force-aligned to a word boundary and the read is NOT rotated
-        // (LDM differs from LDR here).
+        // (LDM differs from LDR here). The walk is always low-register-
+        // to-low-address; §4.3 normalized the decreasing modes to this
+        // same forward scan before the loop starts.
         for (u32 i = 0; i < 16; ++i) {
             if ((reg_list & (1u << i)) != 0u) {
                 state.r[i] = bus.read32(addr & ~0x3u);
@@ -94,9 +96,11 @@ u32 dispatch_block(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
             }
         }
     } else {
-        // STM IA — store each listed register to [start_addr + 4*k],
+        // STM — store each listed register to [start_addr + 4*k],
         // force-aligned per spec §4.4 STM step 5. R15-in-list is gated
-        // out above, so no PC+12 special case is needed yet.
+        // out above, so no PC+12 special case is needed yet. Decreasing
+        // modes share this loop because §4.3 already produced the
+        // lowest-touched address in start_addr.
         for (u32 i = 0; i < 16; ++i) {
             if ((reg_list & (1u << i)) != 0u) {
                 bus.write32(addr & ~0x3u, state.r[i]);
@@ -106,8 +110,9 @@ u32 dispatch_block(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
     }
 
     // Writeback (spec §4.4 LDM/STM step 7). Rn-in-list is gated out of
-    // is_base_case_ia, so the simple rule applies unconditionally here:
-    // Rn receives wb_value from the addressing helper.
+    // is_base_case_any_mode, so the simple rule applies unconditionally
+    // here: Rn receives wb_value from the addressing helper, which is
+    // Rn ± 4*n depending on U.
     if (w_bit) {
         state.r[rn] = addressing.wb_value;
     }

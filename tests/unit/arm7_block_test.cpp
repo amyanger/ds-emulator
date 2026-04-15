@@ -3,11 +3,13 @@
 // dispatch wiring, commit 4 verified the addressing-mode helpers in
 // isolation, commit 5 promoted the STMIA scaffold test into the first
 // real-execution test (simplest STM IA base case), commit 6 added the
-// mirror LDM IA base case: W=0, S=0, P=0, U=1, Rn not in list, R15
-// not in list, non-empty list, and commit 7 adds the writeback (W=1)
-// variants of both IA base cases — Rn is updated to wb_value = Rn +
-// 4*n after the transfer. The Rn-in-list writeback rules from spec
-// §5.5 are still gated out and covered in commits 9/10.
+// mirror LDM IA base case, commit 7 wired up IA writeback, and commit
+// 8 drops the IA-only restriction so all four addressing modes (IA,
+// IB, DA, DB) run through the same forward-walk engine. The test_all_
+// addressing_modes parametrized helper covers the 16-case matrix of
+// {mode} × {LDM,STM} × {W=0,W=1}. The four IA-specific regression
+// tests from commits 5–7 are kept as concrete anchors. The Rn-in-list
+// writeback rules from spec §5.5 are still gated out (commits 9/10).
 
 #include "bus/arm7_bus.hpp"
 #include "cpu/arm7/arm7.hpp"
@@ -230,6 +232,216 @@ static void test_ldm_ia_writeback() {
     REQUIRE(nds.cpu7().state().cycles == cycles_before + 1u);
 }
 
+// Commit-8 parametrized coverage: one helper, one call per
+// {mode, load_store, writeback} combination. Rn is R0 seeded at a
+// mid-range ARM7-WRAM address (0x0380'0400) so all four modes stay
+// well inside the 64 KB mirror regardless of direction. reg_list is
+// {R1, R2, R3} (encoded as 0x000E) so the helper exercises a 3-word
+// transfer — the same shape as the commits 5–7 regression tests.
+//
+// For every call we compute the expected start/last/wb addresses
+// directly from the §5.4 table (not from the helper under test) to
+// keep this an end-to-end check of dispatch_block rather than a
+// circular verification of compute_block_addressing.
+static void run_block_mode_case(bool p_bit, bool u_bit, bool l_bit, bool w_bit) {
+    NDS nds;
+
+    constexpr u32 kRnBase = 0x0380'0400u;
+    constexpr u32 kRegList = 0x000Eu; // {R1, R2, R3}
+    constexpr u32 kN = 3u;
+    constexpr u32 kBytes = 4u * kN;
+
+    // Expected first-transfer address and writeback value, derived from
+    // spec §5.4 directly rather than from compute_block_addressing.
+    u32 expected_first;
+    u32 expected_wb;
+    if (u_bit) {
+        // IA: first = Rn,     wb = Rn + 4*n
+        // IB: first = Rn + 4, wb = Rn + 4*n
+        expected_first = kRnBase + (p_bit ? 4u : 0u);
+        expected_wb = kRnBase + kBytes;
+    } else {
+        // DA: first = Rn - 4*(n-1), wb = Rn - 4*n
+        // DB: first = Rn - 4*n,     wb = Rn - 4*n
+        expected_first = p_bit ? (kRnBase - kBytes) : (kRnBase - 4u * (kN - 1u));
+        expected_wb = kRnBase - kBytes;
+    }
+
+    // Build the instruction on the fly. cond=AL, bits[27:25]=100,
+    // Rn=R0, reg_list=0x000E.
+    const u32 instr = 0xE800'0000u | (static_cast<u32>(p_bit) << 24) |
+                      (static_cast<u32>(u_bit) << 23) | (static_cast<u32>(w_bit) << 21) |
+                      (static_cast<u32>(l_bit) << 20) | (0u << 16) // Rn = R0
+                      | kRegList;
+
+    // Sentinels:
+    //  - For LDM, seed memory at expected_first + {0,4,8} so the three
+    //    registers pick up AAAA/BBBB/CCCC in order.
+    //  - For STM, seed R1..R3 with 1111/2222/3333 so we can assert the
+    //    stored words land at expected_first + {0,4,8}.
+    constexpr u32 kSentMemA = 0xAAAA'AAAAu;
+    constexpr u32 kSentMemB = 0xBBBB'BBBBu;
+    constexpr u32 kSentMemC = 0xCCCC'CCCCu;
+    constexpr u32 kSentRegA = 0x1111'1111u;
+    constexpr u32 kSentRegB = 0x2222'2222u;
+    constexpr u32 kSentRegC = 0x3333'3333u;
+
+    nds.cpu7().state().r[0] = kRnBase;
+
+    if (l_bit) {
+        // LDM: zero the target registers, preload memory.
+        nds.cpu7().state().r[1] = 0u;
+        nds.cpu7().state().r[2] = 0u;
+        nds.cpu7().state().r[3] = 0u;
+        nds.arm7_bus().write32(expected_first + 0u, kSentMemA);
+        nds.arm7_bus().write32(expected_first + 4u, kSentMemB);
+        nds.arm7_bus().write32(expected_first + 8u, kSentMemC);
+    } else {
+        // STM: seed the source registers, zero the target memory so a
+        // missed write is visible.
+        nds.cpu7().state().r[1] = kSentRegA;
+        nds.cpu7().state().r[2] = kSentRegB;
+        nds.cpu7().state().r[3] = kSentRegC;
+        nds.arm7_bus().write32(expected_first + 0u, 0u);
+        nds.arm7_bus().write32(expected_first + 4u, 0u);
+        nds.arm7_bus().write32(expected_first + 8u, 0u);
+    }
+
+    // Snapshot R4..R14 to prove the non-listed GPRs are untouched.
+    u32 r_before[11];
+    for (u32 i = 0; i < 11; ++i) {
+        r_before[i] = nds.cpu7().state().r[4 + i];
+    }
+
+    const u64 cycles_before = nds.cpu7().state().cycles;
+
+    run_one(nds, kBase, instr);
+
+    if (l_bit) {
+        // LDM: R1/R2/R3 pick up the in-order memory sentinels. R4..R14
+        // untouched.
+        REQUIRE(nds.cpu7().state().r[1] == kSentMemA);
+        REQUIRE(nds.cpu7().state().r[2] == kSentMemB);
+        REQUIRE(nds.cpu7().state().r[3] == kSentMemC);
+    } else {
+        // STM: expected_first + {0,4,8} hold R1/R2/R3.
+        REQUIRE(nds.arm7_bus().read32(expected_first + 0u) == kSentRegA);
+        REQUIRE(nds.arm7_bus().read32(expected_first + 4u) == kSentRegB);
+        REQUIRE(nds.arm7_bus().read32(expected_first + 8u) == kSentRegC);
+        // Source registers untouched by the store.
+        REQUIRE(nds.cpu7().state().r[1] == kSentRegA);
+        REQUIRE(nds.cpu7().state().r[2] == kSentRegB);
+        REQUIRE(nds.cpu7().state().r[3] == kSentRegC);
+    }
+
+    // Writeback: Rn = wb_value when W=1, unchanged when W=0.
+    if (w_bit) {
+        REQUIRE(nds.cpu7().state().r[0] == expected_wb);
+    } else {
+        REQUIRE(nds.cpu7().state().r[0] == kRnBase);
+    }
+
+    for (u32 i = 0; i < 11; ++i) {
+        REQUIRE(nds.cpu7().state().r[4 + i] == r_before[i]);
+    }
+
+    // Standard pipeline bookkeeping: PC advanced by 4, one ARM7 cycle.
+    REQUIRE(nds.cpu7().state().pc == kBase + 4u);
+    REQUIRE(nds.cpu7().state().cycles == cycles_before + 1u);
+}
+
+// Matrix coverage: {IA, IB, DA, DB} × {LDM, STM} × {W=0, W=1} — 16
+// sub-cases. The helper above does the per-case assertions; this test
+// exists to enumerate every leaf of the matrix so the commit-8 gate
+// change is exercised end-to-end for all four addressing modes.
+static void test_all_addressing_modes() {
+    // IA — P=0, U=1
+    run_block_mode_case(/*p=*/false, /*u=*/true, /*l=*/false, /*w=*/false);
+    run_block_mode_case(/*p=*/false, /*u=*/true, /*l=*/false, /*w=*/true);
+    run_block_mode_case(/*p=*/false, /*u=*/true, /*l=*/true, /*w=*/false);
+    run_block_mode_case(/*p=*/false, /*u=*/true, /*l=*/true, /*w=*/true);
+
+    // IB — P=1, U=1
+    run_block_mode_case(/*p=*/true, /*u=*/true, /*l=*/false, /*w=*/false);
+    run_block_mode_case(/*p=*/true, /*u=*/true, /*l=*/false, /*w=*/true);
+    run_block_mode_case(/*p=*/true, /*u=*/true, /*l=*/true, /*w=*/false);
+    run_block_mode_case(/*p=*/true, /*u=*/true, /*l=*/true, /*w=*/true);
+
+    // DA — P=0, U=0
+    run_block_mode_case(/*p=*/false, /*u=*/false, /*l=*/false, /*w=*/false);
+    run_block_mode_case(/*p=*/false, /*u=*/false, /*l=*/false, /*w=*/true);
+    run_block_mode_case(/*p=*/false, /*u=*/false, /*l=*/true, /*w=*/false);
+    run_block_mode_case(/*p=*/false, /*u=*/false, /*l=*/true, /*w=*/true);
+
+    // DB — P=1, U=0
+    run_block_mode_case(/*p=*/true, /*u=*/false, /*l=*/false, /*w=*/false);
+    run_block_mode_case(/*p=*/true, /*u=*/false, /*l=*/false, /*w=*/true);
+    run_block_mode_case(/*p=*/true, /*u=*/false, /*l=*/true, /*w=*/false);
+    run_block_mode_case(/*p=*/true, /*u=*/false, /*l=*/true, /*w=*/true);
+}
+
+// Spec §6.1 item 13: normalization smoke test. STMDB R0!, {R1,R2,R3,R4}
+// with R0 = 0x0380'1000 must store R1 at 0x0380'0FF0 (NOT at the base)
+// and land R4 at 0x0380'0FFC, with writeback of 0x0380'0FF0. The point
+// is to prove the §4.3 forward-walk normalization computed the lowest
+// address up front — a naive "subtract-then-step" implementation would
+// put the first store at R0 itself.
+//
+// Base lives in the same ARM7 WRAM mirror every other test uses. The
+// spec example uses main-RAM 0x2000'1000 but that region isn't where
+// the rest of the arm7_block suite exercises the bus; the normalization
+// semantics we're pinning are bus-region-independent.
+static void test_stmdb_normalization_smoke() {
+    NDS nds;
+
+    constexpr u32 kDbBase = 0x0380'1000u;  // Rn
+    constexpr u32 kFirstWr = 0x0380'0FF0u; // Rn - 4*n, lowest addr (n=4)
+    // reg_list = 0x001E = {R1, R2, R3, R4} — baked into instr below.
+    constexpr u32 kSentR1 = 0x1111'1111u;
+    constexpr u32 kSentR2 = 0x2222'2222u;
+    constexpr u32 kSentR3 = 0x3333'3333u;
+    constexpr u32 kSentR4 = 0x4444'4444u;
+
+    nds.cpu7().state().r[0] = kDbBase;
+    nds.cpu7().state().r[1] = kSentR1;
+    nds.cpu7().state().r[2] = kSentR2;
+    nds.cpu7().state().r[3] = kSentR3;
+    nds.cpu7().state().r[4] = kSentR4;
+
+    // Clear the destination range so a missed write is visible, and
+    // also clear the "naive" mis-targets at kDbBase..+12 so we can
+    // prove nothing landed there.
+    for (u32 off = 0; off < 16u; off += 4u) {
+        nds.arm7_bus().write32(kFirstWr + off, 0u);
+        nds.arm7_bus().write32(kDbBase + off, 0u);
+    }
+
+    // Encoding: STMDB R0!, {R1,R2,R3,R4}
+    //   cond=AL, bits[27:25]=100, P=1, U=0, S=0, W=1, L=0,
+    //   Rn=0, reg_list=0x001E → 0xE920001E.
+    const u32 instr = 0xE920'001Eu;
+
+    run_one(nds, kBase, instr);
+
+    // First store at kFirstWr, last at kFirstWr + 12. The register-to-
+    // address mapping is still low-register-to-low-address: R1 goes to
+    // the lowest address, R4 to the highest.
+    REQUIRE(nds.arm7_bus().read32(kFirstWr + 0u) == kSentR1);
+    REQUIRE(nds.arm7_bus().read32(kFirstWr + 4u) == kSentR2);
+    REQUIRE(nds.arm7_bus().read32(kFirstWr + 8u) == kSentR3);
+    REQUIRE(nds.arm7_bus().read32(kFirstWr + 12u) == kSentR4);
+
+    // Nothing should have landed at the base or above — this is the
+    // anti-regression pin for the §4.3 normalization.
+    REQUIRE(nds.arm7_bus().read32(kDbBase + 0u) == 0u);
+    REQUIRE(nds.arm7_bus().read32(kDbBase + 4u) == 0u);
+    REQUIRE(nds.arm7_bus().read32(kDbBase + 8u) == 0u);
+    REQUIRE(nds.arm7_bus().read32(kDbBase + 12u) == 0u);
+
+    // Writeback: Rn = Rn - 4*n = kFirstWr.
+    REQUIRE(nds.cpu7().state().r[0] == kFirstWr);
+}
+
 // Direct-call tests for the addressing-mode normalization helpers in
 // arm7_block_internal.hpp. These cover every row of the §5.4 table and
 // the §5.8 empty-list case without standing up an NDS harness. Commit 5
@@ -372,8 +584,11 @@ int main() {
     test_stm_ia_base_case();
     test_stm_ia_writeback();
     test_ldm_ia_writeback();
+    test_all_addressing_modes();
+    test_stmdb_normalization_smoke();
     test_block_addressing_helpers();
 
-    std::puts("arm7_block_test: LDM/STM IA base cases + writeback + helpers verified");
+    std::puts("arm7_block_test: LDM/STM IA base cases + {IA,IB,DA,DB} matrix + DB "
+              "normalization + helpers verified");
     return 0;
 }
