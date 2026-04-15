@@ -84,4 +84,76 @@ u32 dispatch_thumb_imm_dp(Arm7State& state,
     return execute_dp_op(state, op_table[op], rn_value, imm8, current_c, true, rd, instr_addr);
 }
 
+// ---- THUMB.4 (bits[15:10] == 010000) ----
+// ALU register/register: Rd = Rd <op> Rs.  Sixteen ops.
+
+u32 dispatch_thumb_alu(Arm7State& state,
+                       Arm7Bus& /*bus*/,
+                       u16 instr,
+                       u32 instr_addr,
+                       u32 /*pc_read*/,
+                       u32 /*pc_literal*/) {
+    const u32 op = (instr >> 6) & 0xFu;
+    const u32 rs = (instr >> 3) & 0x7u;
+    const u32 rd = instr & 0x7u;
+
+    const u32 rd_value = state.r[rd];
+    const u32 rs_value = state.r[rs];
+    const bool current_c = (state.cpsr & (1u << 29)) != 0;
+
+    // Shift ops (LSL/LSR/ASR/ROR) use the register-shift barrel path.
+    // The amount is Rs[7:0]. If amount == 0, C is unchanged.
+    auto do_shift = [&](ShiftType st) -> u32 {
+        const u32 amount = rs_value & 0xFFu;
+        auto sr = barrel_shift_reg(rd_value, st, amount);
+        const bool carry = (amount == 0) ? current_c : sr.carry;
+        return execute_dp_op(state, DpOp::MOV, 0, sr.value, carry, true, rd, instr_addr);
+    };
+
+    switch (op) {
+    case 0x0: // AND — NZ only
+        return execute_dp_op(state, DpOp::AND, rd_value, rs_value, current_c, true, rd, instr_addr);
+    case 0x1: // EOR — NZ only
+        return execute_dp_op(state, DpOp::EOR, rd_value, rs_value, current_c, true, rd, instr_addr);
+    case 0x2: // LSL reg — NZC (C unchanged if amount==0)
+        return do_shift(ShiftType::Lsl);
+    case 0x3: // LSR reg
+        return do_shift(ShiftType::Lsr);
+    case 0x4: // ASR reg
+        return do_shift(ShiftType::Asr);
+    case 0x5: // ADC — NZCV
+        return execute_dp_op(state, DpOp::ADC, rd_value, rs_value, current_c, true, rd, instr_addr);
+    case 0x6: // SBC — NZCV
+        return execute_dp_op(state, DpOp::SBC, rd_value, rs_value, current_c, true, rd, instr_addr);
+    case 0x7: // ROR reg — NZC
+        return do_shift(ShiftType::Ror);
+    case 0x8: // TST — NZ only, no writeback
+        return execute_dp_op(state, DpOp::TST, rd_value, rs_value, current_c, true, rd, instr_addr);
+    case 0x9: // NEG = RSB Rd, Rs, #0 — NZCV
+        return execute_dp_op(state, DpOp::RSB, rs_value, 0, current_c, true, rd, instr_addr);
+    case 0xA: // CMP — NZCV, no writeback
+        return execute_dp_op(state, DpOp::CMP, rd_value, rs_value, current_c, true, rd, instr_addr);
+    case 0xB: // CMN — NZCV, no writeback
+        return execute_dp_op(state, DpOp::CMN, rd_value, rs_value, current_c, true, rd, instr_addr);
+    case 0xC: // ORR — NZ only
+        return execute_dp_op(state, DpOp::ORR, rd_value, rs_value, current_c, true, rd, instr_addr);
+    case 0xD: { // MUL — ARMv4: NZ set, C destroyed, V unchanged
+        const u32 result = rd_value * rs_value;
+        write_rd(state, rd, result);
+        state.cpsr = set_nz(state.cpsr, result);
+        // ARMv4: C is implementation-defined (destroyed). We invert it
+        // so the destroy is observable in tests. ARM9 (ARMv5) will flip
+        // this to "C unchanged."
+        state.cpsr = set_c(state.cpsr, !current_c);
+        return 1;
+    }
+    case 0xE: // BIC — NZ only
+        return execute_dp_op(state, DpOp::BIC, rd_value, rs_value, current_c, true, rd, instr_addr);
+    case 0xF: // MVN — NZ only
+        return execute_dp_op(state, DpOp::MVN, rd_value, rs_value, current_c, true, rd, instr_addr);
+    default:
+        return 1; // unreachable — op is 4 bits
+    }
+}
+
 } // namespace ds

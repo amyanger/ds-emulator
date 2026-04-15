@@ -28,6 +28,11 @@ u32 dispatch_thumb_imm_dp(
     Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
 u32 dispatch_thumb_010_space(
     Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
+
+// THUMB.4 ALU register/register — 16 ops (AND..MVN).
+// Defined in arm7_thumb_dp.cpp.
+u32 dispatch_thumb_alu(
+    Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
 u32 dispatch_thumb_ldst_imm_wb(
     Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
 u32 dispatch_thumb_100_space(

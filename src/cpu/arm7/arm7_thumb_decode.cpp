@@ -26,7 +26,13 @@ namespace ds {
 // Defined in arm7_thumb_dp.cpp.
 
 u32 dispatch_thumb_010_space(
-    Arm7State&, Arm7Bus&, u16 instr, u32 instr_addr, u32 /*pc_read*/, u32 /*pc_literal*/) {
+    Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal) {
+    // Fan-out: bit12 separates THUMB.4/5/6 (bit12=0) from THUMB.7/8 (bit12=1).
+    if ((instr & 0xFC00u) == 0x4000u) {
+        // THUMB.4: 010000 op4 Rs3 Rd3
+        return dispatch_thumb_alu(state, bus, instr, instr_addr, pc_read, pc_literal);
+    }
+    // THUMB.5, .6, .7, .8 — stubs until their commits land.
     DS_LOG_WARN("arm7/thumb: 010_space stub instr=0x%04X at 0x%08X", instr, instr_addr);
     return 1;
 }

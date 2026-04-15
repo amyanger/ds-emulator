@@ -459,6 +459,324 @@ static void thumb3_sub_max_imm() {
     REQUIRE(flag_c(nds.cpu7().state().cpsr));
 }
 
+// Encode THUMB.4: 010000 op4 Rs3 Rd3
+static u16 thumb4(u32 op, u32 rs, u32 rd) {
+    return static_cast<u16>((0b010000u << 10) | (op << 6) | (rs << 3) | rd);
+}
+
+// ==== THUMB.4 — ALU register/register ====
+
+static void thumb4_and() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb4(0x0, 1, 0)); // AND R0, R1
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 0xFF00'FF00u;
+    nds.cpu7().state().r[1] = 0x0F0F'0F0Fu;
+    nds.cpu7().state().cpsr |= (1u << 29) | (1u << 28); // C=1, V=1
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 0x0F00'0F00u);
+    REQUIRE(!flag_n(nds.cpu7().state().cpsr));
+    REQUIRE(!flag_z(nds.cpu7().state().cpsr));
+    REQUIRE(flag_c(nds.cpu7().state().cpsr)); // C preserved (logical op)
+    REQUIRE(flag_v(nds.cpu7().state().cpsr)); // V preserved
+}
+
+static void thumb4_eor() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb4(0x1, 2, 3)); // EOR R3, R2
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[3] = 0xAAAA'AAAAu;
+    nds.cpu7().state().r[2] = 0xFFFF'FFFFu;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[3] == 0x5555'5555u);
+    REQUIRE(!flag_n(nds.cpu7().state().cpsr));
+}
+
+static void thumb4_lsl_reg() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb4(0x2, 1, 0)); // LSL R0, R1
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 0x0000'00FFu;
+    nds.cpu7().state().r[1] = 8;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 0x0000'FF00u);
+    REQUIRE(!flag_n(nds.cpu7().state().cpsr));
+    REQUIRE(!flag_z(nds.cpu7().state().cpsr));
+}
+
+static void thumb4_lsl_reg_zero_preserves_c() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb4(0x2, 1, 0)); // LSL R0, R1
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 42;
+    nds.cpu7().state().r[1] = 0;           // shift by 0
+    nds.cpu7().state().cpsr |= (1u << 29); // C=1
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 42);
+    REQUIRE(flag_c(nds.cpu7().state().cpsr)); // C preserved
+}
+
+static void thumb4_lsr_reg() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb4(0x3, 2, 3)); // LSR R3, R2
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[3] = 0xFF00u;
+    nds.cpu7().state().r[2] = 8;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[3] == 0x00FFu);
+}
+
+static void thumb4_lsr_reg_32_zeros_result() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb4(0x3, 1, 0)); // LSR R0, R1
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 0x8000'0000u;
+    nds.cpu7().state().r[1] = 32;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 0);
+    REQUIRE(flag_z(nds.cpu7().state().cpsr));
+    REQUIRE(flag_c(nds.cpu7().state().cpsr)); // bit 31 shifted out
+}
+
+static void thumb4_asr_reg() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb4(0x4, 1, 0)); // ASR R0, R1
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 0x8000'0000u;
+    nds.cpu7().state().r[1] = 16;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'8000u);
+    REQUIRE(flag_n(nds.cpu7().state().cpsr));
+}
+
+static void thumb4_adc() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb4(0x5, 1, 0)); // ADC R0, R1
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 10;
+    nds.cpu7().state().r[1] = 20;
+    nds.cpu7().state().cpsr |= (1u << 29); // C=1
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 31); // 10 + 20 + 1
+    REQUIRE(!flag_c(nds.cpu7().state().cpsr));
+}
+
+static void thumb4_adc_carry_out() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb4(0x5, 1, 0)); // ADC R0, R1
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 0xFFFF'FFFFu;
+    nds.cpu7().state().r[1] = 0;
+    nds.cpu7().state().cpsr |= (1u << 29); // C=1
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 0);
+    REQUIRE(flag_z(nds.cpu7().state().cpsr));
+    REQUIRE(flag_c(nds.cpu7().state().cpsr)); // carry out
+}
+
+static void thumb4_sbc() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb4(0x6, 1, 0)); // SBC R0, R1
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 100;
+    nds.cpu7().state().r[1] = 30;
+    nds.cpu7().state().cpsr |= (1u << 29); // C=1 (no borrow in)
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 70);   // 100 - 30 - 0
+    REQUIRE(flag_c(nds.cpu7().state().cpsr)); // no borrow
+}
+
+static void thumb4_sbc_with_borrow() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb4(0x6, 1, 0)); // SBC R0, R1
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 100;
+    nds.cpu7().state().r[1] = 30;
+    nds.cpu7().state().cpsr &= ~(1u << 29); // C=0 (borrow in)
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 69); // 100 - 30 - 1
+}
+
+static void thumb4_ror_reg() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb4(0x7, 1, 0)); // ROR R0, R1
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 0x0000'00FFu;
+    nds.cpu7().state().r[1] = 4;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 0xF000'000Fu);
+    REQUIRE(flag_n(nds.cpu7().state().cpsr));
+}
+
+static void thumb4_tst_zero() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb4(0x8, 1, 0)); // TST R0, R1
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 0xFF00u;
+    nds.cpu7().state().r[1] = 0x00FFu;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 0xFF00u); // no writeback
+    REQUIRE(flag_z(nds.cpu7().state().cpsr));
+}
+
+static void thumb4_tst_nonzero() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb4(0x8, 1, 0)); // TST R0, R1
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 0xFF00u;
+    nds.cpu7().state().r[1] = 0x0F00u;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 0xFF00u); // no writeback
+    REQUIRE(!flag_z(nds.cpu7().state().cpsr));
+}
+
+static void thumb4_neg() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb4(0x9, 1, 0)); // NEG R0, R1
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[1] = 42;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == static_cast<u32>(-42));
+    REQUIRE(flag_n(nds.cpu7().state().cpsr));
+    REQUIRE(!flag_c(nds.cpu7().state().cpsr)); // 0 - 42 borrows
+}
+
+static void thumb4_neg_zero() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb4(0x9, 1, 0)); // NEG R0, R1
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[1] = 0;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 0);
+    REQUIRE(flag_z(nds.cpu7().state().cpsr));
+    REQUIRE(flag_c(nds.cpu7().state().cpsr)); // 0 - 0, no borrow
+}
+
+static void thumb4_cmp() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb4(0xA, 1, 0)); // CMP R0, R1
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 50;
+    nds.cpu7().state().r[1] = 50;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 50); // no writeback
+    REQUIRE(flag_z(nds.cpu7().state().cpsr));
+    REQUIRE(flag_c(nds.cpu7().state().cpsr));
+}
+
+static void thumb4_cmn() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb4(0xB, 1, 0)); // CMN R0, R1
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 0xFFFF'FFFFu;
+    nds.cpu7().state().r[1] = 1;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'FFFFu); // no writeback
+    REQUIRE(flag_z(nds.cpu7().state().cpsr));         // -1 + 1 = 0
+    REQUIRE(flag_c(nds.cpu7().state().cpsr));         // carry out
+}
+
+static void thumb4_orr() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb4(0xC, 1, 0)); // ORR R0, R1
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 0xFF00'0000u;
+    nds.cpu7().state().r[1] = 0x0000'00FFu;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 0xFF00'00FFu);
+    REQUIRE(flag_n(nds.cpu7().state().cpsr));
+}
+
+static void thumb4_mul_basic() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb4(0xD, 1, 0)); // MUL R0, R1
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 7;
+    nds.cpu7().state().r[1] = 6;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 42);
+    REQUIRE(!flag_n(nds.cpu7().state().cpsr));
+    REQUIRE(!flag_z(nds.cpu7().state().cpsr));
+}
+
+static void thumb4_mul_zero() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb4(0xD, 1, 0)); // MUL R0, R1
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 123;
+    nds.cpu7().state().r[1] = 0;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 0);
+    REQUIRE(flag_z(nds.cpu7().state().cpsr));
+}
+
+static void thumb4_mul_c_destroyed() {
+    // ARMv4: MUL destroys C. We invert it for deterministic observation.
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb4(0xD, 1, 0)); // MUL R0, R1
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 3;
+    nds.cpu7().state().r[1] = 5;
+    nds.cpu7().state().cpsr |= (1u << 29); // C=1 before
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 15);
+    REQUIRE(!flag_c(nds.cpu7().state().cpsr)); // C must differ (was 1, now 0)
+}
+
+static void thumb4_mul_c_destroyed_from_clear() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb4(0xD, 1, 0)); // MUL R0, R1
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 2;
+    nds.cpu7().state().r[1] = 3;
+    nds.cpu7().state().cpsr &= ~(1u << 29); // C=0 before
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 6);
+    REQUIRE(flag_c(nds.cpu7().state().cpsr)); // C must differ (was 0, now 1)
+}
+
+static void thumb4_mul_v_preserved() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb4(0xD, 1, 0)); // MUL R0, R1
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 2;
+    nds.cpu7().state().r[1] = 3;
+    nds.cpu7().state().cpsr |= (1u << 28); // V=1 before
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 6);
+    REQUIRE(flag_v(nds.cpu7().state().cpsr)); // V preserved
+}
+
+static void thumb4_bic() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb4(0xE, 1, 0)); // BIC R0, R1
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 0xFFFF'FFFFu;
+    nds.cpu7().state().r[1] = 0x0000'FF00u;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'00FFu);
+}
+
+static void thumb4_mvn() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb4(0xF, 1, 0)); // MVN R0, R1
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[1] = 0;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[0] == 0xFFFF'FFFFu);
+    REQUIRE(flag_n(nds.cpu7().state().cpsr));
+}
+
+static void thumb4_same_reg_rd_rs() {
+    // AND R3, R3 — Rd == Rs
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb4(0x0, 3, 3)); // AND R3, R3
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[3] = 0xDEAD'BEEFu;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[3] == 0xDEAD'BEEFu); // x & x = x
+}
+
 int main() {
     // THUMB.2
     thumb2_add_reg();
@@ -503,6 +821,35 @@ int main() {
     thumb3_sub_to_zero();
     thumb3_sub_underflow();
     thumb3_sub_max_imm();
+
+    // THUMB.4
+    thumb4_and();
+    thumb4_eor();
+    thumb4_lsl_reg();
+    thumb4_lsl_reg_zero_preserves_c();
+    thumb4_lsr_reg();
+    thumb4_lsr_reg_32_zeros_result();
+    thumb4_asr_reg();
+    thumb4_adc();
+    thumb4_adc_carry_out();
+    thumb4_sbc();
+    thumb4_sbc_with_borrow();
+    thumb4_ror_reg();
+    thumb4_tst_zero();
+    thumb4_tst_nonzero();
+    thumb4_neg();
+    thumb4_neg_zero();
+    thumb4_cmp();
+    thumb4_cmn();
+    thumb4_orr();
+    thumb4_mul_basic();
+    thumb4_mul_zero();
+    thumb4_mul_c_destroyed();
+    thumb4_mul_c_destroyed_from_clear();
+    thumb4_mul_v_preserved();
+    thumb4_bic();
+    thumb4_mvn();
+    thumb4_same_reg_rd_rs();
 
     return 0;
 }
