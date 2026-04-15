@@ -40,15 +40,19 @@ u32 dispatch_thumb_010_space(
         // THUMB.6: 01001 Rd3 imm8 — LDR PC-rel
         return dispatch_thumb_ldr_pc(state, bus, instr, instr_addr, pc_read, pc_literal);
     }
-    // THUMB.7, .8 — stubs until their commits land.
-    DS_LOG_WARN("arm7/thumb: 010_space stub instr=0x%04X at 0x%08X", instr, instr_addr);
+    // THUMB.7: 0101 xx 0 Ro Rb Rd — LDR/STR/LDRB/STRB reg offset (bit 9 = 0)
+    if ((instr & 0xF200u) == 0x5000u) {
+        return dispatch_thumb_ldst_reg(state, bus, instr, instr_addr, pc_read, pc_literal);
+    }
+    // THUMB.8 — stub until its commit lands.
+    DS_LOG_WARN("arm7/thumb: 010_space stub (THUMB.8) instr=0x%04X at 0x%08X", instr, instr_addr);
     return 1;
 }
 
 u32 dispatch_thumb_ldst_imm_wb(
-    Arm7State&, Arm7Bus&, u16 instr, u32 instr_addr, u32 /*pc_read*/, u32 /*pc_literal*/) {
-    DS_LOG_WARN("arm7/thumb: ldst_imm_wb stub instr=0x%04X at 0x%08X", instr, instr_addr);
-    return 1;
+    Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal) {
+    // Entire 011 bucket is THUMB.9 — LDR/STR/LDRB/STRB imm offset.
+    return dispatch_thumb_ldst_imm(state, bus, instr, instr_addr, pc_read, pc_literal);
 }
 
 u32 dispatch_thumb_100_space(

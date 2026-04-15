@@ -44,6 +44,16 @@ u32 dispatch_thumb_hireg_bx(
 u32 dispatch_thumb_ldr_pc(
     Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
 
+// THUMB.7 LDR/STR/LDRB/STRB with register offset.
+// Defined in arm7_thumb_ls.cpp.
+u32 dispatch_thumb_ldst_reg(
+    Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
+
+// THUMB.9 LDR/STR/LDRB/STRB with immediate offset.
+// Defined in arm7_thumb_ls.cpp.
+u32 dispatch_thumb_ldst_imm(
+    Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
+
 // THUMB.11 LDR/STR SP-relative.
 // Defined in arm7_thumb_ls.cpp.
 u32 dispatch_thumb_ldst_sp(
