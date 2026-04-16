@@ -568,12 +568,12 @@ static void bcond_cond_e_enters_undef() {
 
 // ==== THUMB.17 SWI ====
 
-// Slice 3d commit 8: THUMB.17 enters Supervisor mode with return_addr =
-// instr_addr + 2, jumps to the SWI vector (0x08), masks IRQs, and clears
-// the T bit. Pre-entry CPSR is captured into SPSR_svc. Deep exception-
-// entry semantics (every CPSR bit, SWI number variations) live in
-// arm7_exception_swi_thumb_test.cpp; this case just confirms the dispatch
-// path in the Thumb decoder hands off correctly.
+// Slice 3d commit 8 (updated slice 3e commit 4): THUMB.17 enters Supervisor
+// mode with return_addr = instr_addr + 2, jumps to the SWI vector, then
+// the BIOS-HLE dispatcher's implicit MOVS PC, R14 restores the caller's
+// mode + PC. This case just confirms the dispatch path in the Thumb decoder
+// hands off correctly — deep semantics (every CPSR bit, SWI number variations,
+// the full round-trip) live in arm7_exception_swi_thumb_test.cpp.
 static void swi_enters_supervisor() {
     NDS nds;
     nds.arm7_bus().write16(BASE, thumb17(0x12u));
@@ -585,12 +585,14 @@ static void swi_enters_supervisor() {
     const u64 before = s.cycles;
     nds.cpu7().run_until((before + 3) * 2);
 
+    // Pre-entry mode was Supervisor (reset default), so the restored mode is
+    // still Supervisor — SPSR_svc captured Supervisor+Thumb and the dispatcher
+    // restored it verbatim.
     REQUIRE(s.current_mode() == Mode::Supervisor);
-    REQUIRE(s.pc == 0x00000008u);  // SWI vector
-    REQUIRE(s.r[14] == BASE + 2u); // Thumb return_addr = instr_addr + 2
-    REQUIRE(s.banks.spsr_svc == cpsr_before);
-    REQUIRE((s.cpsr & (1u << 5)) == 0u); // T clear
-    REQUIRE((s.cpsr & (1u << 7)) != 0u); // I set
+    REQUIRE(s.cpsr == cpsr_before);               // every bit restored via SPSR_svc
+    REQUIRE(s.pc == BASE + 2u);                   // return address after MOVS PC, R14
+    REQUIRE(s.banks.spsr_svc == cpsr_before);     // SPSR_svc still holds the capture
+    REQUIRE(s.banks.svc_r13_r14[1] == BASE + 2u); // R14_svc preserved post-swap
 }
 
 // ==== THUMB.18 B unconditional ====

@@ -1,9 +1,15 @@
 // arm7_exception_swi_arm_test.cpp — ARM-state SWI (bits[27:24] == 0b1111)
 // must swap into Supervisor mode with return_addr = instr_addr + 4, jump to
 // the SWI vector (0x00000008), mask IRQs, clear the T bit, capture old CPSR
-// into SPSR_svc, and hand off to the BIOS-HLE dispatcher. The HLE layer is a
-// warn-only stub in slice 3d, so these tests verify only the exception-entry
-// mechanics — SWI bodies land in a later slice. Slice 3d commit 7.
+// into SPSR_svc, and hand off to the BIOS-HLE dispatcher.
+//
+// Slice 3e commit 4 made the HLE dispatcher issue an implicit `MOVS PC, R14`
+// at the end of every SWI body, so the mid-SWI "frozen" state (PC at 0x08,
+// mode = Supervisor, T=0, I=1) is no longer observable through the stepping
+// API — after one SWI step the CPU is already back in the caller's mode at
+// the return address. These tests now verify the full SWI round-trip:
+// SPSR_svc captured the pre-entry CPSR, R14_svc holds the return address,
+// and the restored CPSR/PC match the pre-entry mode + I + T. Slice 3d commit 7.
 
 #include "bus/arm7_bus.hpp"
 #include "cpu/arm7/arm7.hpp"
@@ -39,34 +45,33 @@ constexpr u32 kPreCpsr = 0x2000001Fu;
 
 } // namespace
 
-// Test 1: basic ARM SWI enters Supervisor mode with the documented state
-// transition. Opcode 0xEF000042 — cond=AL, bits[27:24]=1111, SWI# = 0x42.
+// Test 1: basic ARM SWI enters Supervisor mode, runs the stub, and returns
+// to the caller. Opcode 0xEF000042 — cond=AL, bits[27:24]=1111, SWI# = 0x42.
+// Pre-entry: System mode, I=0. Post-round-trip: System mode restored, PC at
+// instr_addr + 4, R14_svc holds the return address, SPSR_svc holds kPreCpsr.
 static void arm_swi_enters_supervisor_mode() {
     NDS nds;
     auto& state = nds.cpu7().state();
 
     // Leave reset-default Supervisor, settle into System mode with kPreCpsr.
-    // I=0 here so the "I set after entry" assertion proves the helper ran.
+    // I=0 here so the SPSR_svc capture isn't trivially satisfied by the reset
+    // default (which has I=1).
     state.switch_mode(Mode::System);
     state.cpsr = kPreCpsr;
 
     run_one_expecting_cycles(nds, kBase, 0xEF000042u, 3);
 
-    REQUIRE(state.current_mode() == Mode::Supervisor);
-    REQUIRE(state.pc == 0x00000008u);   // SWI vector
-    REQUIRE(state.r[14] == kBase + 4u); // return_addr = instr_addr + 4
-    REQUIRE(state.banks.spsr_svc == kPreCpsr);
-    REQUIRE((state.cpsr & (1u << 7)) != 0u); // I set
-    REQUIRE((state.cpsr & (1u << 5)) == 0u); // T clear
-    // F is carried through from the old CPSR (F=0 in kPreCpsr) — SWI does NOT
-    // set the FIQ mask. Confirm that.
-    REQUIRE((state.cpsr & (1u << 6)) == 0u);
+    // Caller-mode state fully restored after the implicit MOVS PC, R14.
+    REQUIRE(state.current_mode() == Mode::System);
+    REQUIRE(state.cpsr == kPreCpsr);                   // every bit restored from SPSR_svc
+    REQUIRE(state.pc == kBase + 4u);                   // return address (R14_svc value)
+    REQUIRE(state.banks.spsr_svc == kPreCpsr);         // SPSR_svc still holds the capture
+    REQUIRE(state.banks.svc_r13_r14[1] == kBase + 4u); // R14_svc stashed on mode swap
 }
 
 // Test 2: a high-bit SWI number (0x1234AB — uses all 24 comment-field bits)
-// must not break the state transition. The stub's warn output isn't asserted
-// because we can't capture it portably, but the entry mechanics are the same
-// regardless of the SWI number, so verifying those here is sufficient.
+// must not break the state transition. Entry mechanics are the same regardless
+// of the SWI number, so verifying the round-trip here is sufficient.
 static void arm_swi_extracts_24bit_comment_field() {
     NDS nds;
     auto& state = nds.cpu7().state();
@@ -76,17 +81,16 @@ static void arm_swi_extracts_24bit_comment_field() {
 
     run_one_expecting_cycles(nds, kBase, 0xEF1234ABu, 3);
 
-    REQUIRE(state.current_mode() == Mode::Supervisor);
-    REQUIRE(state.pc == 0x00000008u);
-    REQUIRE(state.r[14] == kBase + 4u);
+    REQUIRE(state.current_mode() == Mode::System);
+    REQUIRE(state.cpsr == kPreCpsr);
+    REQUIRE(state.pc == kBase + 4u);
     REQUIRE(state.banks.spsr_svc == kPreCpsr);
-    REQUIRE((state.cpsr & (1u << 7)) != 0u); // I set
-    REQUIRE((state.cpsr & (1u << 5)) == 0u); // T clear
+    REQUIRE(state.banks.svc_r13_r14[1] == kBase + 4u);
 }
 
-// Test 3: even if entry-time CPSR has I=0 (IRQs enabled), post-SWI CPSR
-// must have I=1. SPSR_svc captures the original I=0 so MOVS PC, R14 later
-// can restore it.
+// Test 3: SPSR_svc must faithfully capture the pre-entry CPSR even when the
+// I bit starts at 0, so the implicit MOVS PC, R14 restores I=0 verbatim.
+// Start from plain System + I=0, run the SWI, and confirm I is restored.
 static void arm_swi_runs_with_irqs_masked_after_entry() {
     NDS nds;
     auto& state = nds.cpu7().state();
@@ -97,9 +101,9 @@ static void arm_swi_runs_with_irqs_masked_after_entry() {
 
     run_one_expecting_cycles(nds, kBase, 0xEF000042u, 3);
 
-    REQUIRE(state.current_mode() == Mode::Supervisor);
-    REQUIRE((state.cpsr & (1u << 7)) != 0u);           // I set by entry
-    REQUIRE((state.banks.spsr_svc & (1u << 7)) == 0u); // pre-entry I=0 preserved
+    REQUIRE(state.current_mode() == Mode::System);
+    REQUIRE((state.banks.spsr_svc & (1u << 7)) == 0u); // pre-entry I=0 preserved in SPSR
+    REQUIRE((state.cpsr & (1u << 7)) == 0u);           // I=0 restored to CPSR
 }
 
 int main() {

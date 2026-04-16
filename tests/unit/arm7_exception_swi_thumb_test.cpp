@@ -2,9 +2,16 @@
 // 11011111 imm8) must swap into Supervisor mode with return_addr =
 // instr_addr + 2 (Thumb SWI return contract per GBATEK / spec §5.3), jump
 // to the SWI vector (0x00000008), mask IRQs, clear the T bit, capture old
-// CPSR into SPSR_svc, and hand off to the BIOS-HLE dispatcher. The HLE
-// layer is a warn-only stub in slice 3d, so these tests verify only the
-// exception-entry mechanics. Slice 3d commit 8.
+// CPSR into SPSR_svc, and hand off to the BIOS-HLE dispatcher.
+//
+// Slice 3e commit 4 made the HLE dispatcher issue an implicit `MOVS PC, R14`
+// at the end of every SWI body, so the mid-SWI "frozen" state (PC at 0x08,
+// mode = Supervisor, T=0, I=1) is no longer observable through the stepping
+// API — after one SWI step the CPU is already back in the caller's mode at
+// the return address. These tests now verify the full SWI round-trip:
+// SPSR_svc captured the pre-entry CPSR, R14_svc holds the return address,
+// and the restored CPSR/PC match the pre-entry Thumb mode + I + T.
+// Slice 3d commit 8.
 
 #include "bus/arm7_bus.hpp"
 #include "cpu/arm7/arm7.hpp"
@@ -41,8 +48,10 @@ constexpr u32 kPreCpsr = 0x2000003Fu;
 
 } // namespace
 
-// Test 1: THUMB.17 SWI 0xAB enters Supervisor mode with the documented
-// state transition. Opcode 0xDFAB — 11011111 imm8, imm8 = 0xAB.
+// Test 1: THUMB.17 SWI 0xAB runs through the round-trip. Opcode 0xDFAB —
+// 11011111 imm8, imm8 = 0xAB. Pre-entry: System+Thumb. Post-round-trip:
+// System+Thumb restored, PC at instr_addr + 2, R14_svc holds the return
+// address, SPSR_svc holds kPreCpsr.
 static void thumb_swi_enters_supervisor_mode() {
     NDS nds;
     auto& state = nds.cpu7().state();
@@ -52,20 +61,17 @@ static void thumb_swi_enters_supervisor_mode() {
 
     run_one_thumb_expecting_cycles(nds, kBase, 0xDFABu, 3);
 
-    REQUIRE(state.current_mode() == Mode::Supervisor);
-    REQUIRE(state.pc == 0x00000008u);   // SWI vector
-    REQUIRE(state.r[14] == kBase + 2u); // Thumb return_addr = instr_addr + 2
-    REQUIRE(state.banks.spsr_svc == kPreCpsr);
-    REQUIRE((state.cpsr & (1u << 7)) != 0u); // I set
-    REQUIRE((state.cpsr & (1u << 5)) == 0u); // T clear (exceptions enter ARM state)
-    // F is carried through from the old CPSR (F=0 in kPreCpsr) — SWI does NOT
-    // set the FIQ mask. Confirm that.
-    REQUIRE((state.cpsr & (1u << 6)) == 0u);
+    REQUIRE(state.current_mode() == Mode::System);
+    REQUIRE(state.cpsr == kPreCpsr);                   // restored from SPSR_svc
+    REQUIRE(state.pc == kBase + 2u);                   // Thumb return_addr
+    REQUIRE(state.banks.spsr_svc == kPreCpsr);         // still holds the capture
+    REQUIRE(state.banks.svc_r13_r14[1] == kBase + 2u); // R14_svc stashed on swap
+    REQUIRE((state.cpsr & (1u << 5)) != 0u);           // T=1 (Thumb) restored
 }
 
-// Test 2: a different SWI number (0x00) must produce an identical state
-// transition — the SWI number only matters to the HLE dispatcher, not to
-// the entry machinery. Use 0xDF00 (SWI 0).
+// Test 2: a different SWI number (0x00) must produce an identical round-trip
+// — the SWI number only matters to the HLE dispatcher, not to the entry or
+// return machinery. Use 0xDF00 (SWI 0).
 static void thumb_swi_extracts_8bit_number() {
     NDS nds;
     auto& state = nds.cpu7().state();
@@ -75,17 +81,16 @@ static void thumb_swi_extracts_8bit_number() {
 
     run_one_thumb_expecting_cycles(nds, kBase, 0xDF00u, 3);
 
-    REQUIRE(state.current_mode() == Mode::Supervisor);
-    REQUIRE(state.pc == 0x00000008u);
-    REQUIRE(state.r[14] == kBase + 2u);
+    REQUIRE(state.current_mode() == Mode::System);
+    REQUIRE(state.cpsr == kPreCpsr);
+    REQUIRE(state.pc == kBase + 2u);
     REQUIRE(state.banks.spsr_svc == kPreCpsr);
-    REQUIRE((state.cpsr & (1u << 7)) != 0u); // I set
-    REQUIRE((state.cpsr & (1u << 5)) == 0u); // T clear
+    REQUIRE(state.banks.svc_r13_r14[1] == kBase + 2u);
 }
 
-// Test 3: pre-entry CPSR with I=0 (IRQs enabled) must yield post-entry
-// CPSR with I=1. SPSR_svc captures the original I=0 so MOVS PC, R14 later
-// can restore it. Start from plain System+Thumb, no flags.
+// Test 3: SPSR_svc must faithfully capture the pre-entry CPSR bits, and the
+// implicit MOVS PC, R14 must restore I=0 + T=1 verbatim. Start from plain
+// System+Thumb with I=0.
 static void thumb_swi_sets_i_mask_from_i_zero_start() {
     NDS nds;
     auto& state = nds.cpu7().state();
@@ -96,11 +101,11 @@ static void thumb_swi_sets_i_mask_from_i_zero_start() {
 
     run_one_thumb_expecting_cycles(nds, kBase, 0xDFABu, 3);
 
-    REQUIRE(state.current_mode() == Mode::Supervisor);
-    REQUIRE((state.cpsr & (1u << 7)) != 0u);           // I set by entry
-    REQUIRE((state.cpsr & (1u << 5)) == 0u);           // T clear
+    REQUIRE(state.current_mode() == Mode::System);
     REQUIRE((state.banks.spsr_svc & (1u << 7)) == 0u); // pre-entry I=0 preserved
     REQUIRE((state.banks.spsr_svc & (1u << 5)) != 0u); // pre-entry T=1 preserved
+    REQUIRE((state.cpsr & (1u << 7)) == 0u);           // I=0 restored
+    REQUIRE((state.cpsr & (1u << 5)) != 0u);           // T=1 restored
 }
 
 int main() {
