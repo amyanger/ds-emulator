@@ -66,13 +66,17 @@ u32 dispatch_thumb_100_space(
 
 u32 dispatch_thumb_101_space(
     Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal) {
-    // bits[15:13] == 101. Three sub-families share this space:
-    //   THUMB.12 ADD PC/SP:      1010 x ...      (top nibble 0xA)
-    //   THUMB.14 PUSH/POP:       1011 x10 R ...  — (instr & 0xF600) == 0xB400
-    //   THUMB.13 ADD SP signed:  1011 0000 ...   — the remaining 0xB000 region
-    //
-    // Check THUMB.14 first: PUSH/POP is emitted at every function
-    // prologue/epilogue and dominates runtime frequency in this bucket.
+    // bits[15:13] == 101. Three sub-families share this space (most-specific
+    // mask first):
+    //   THUMB.12 ADD PC/SP:      1010 x ...        (top nibble 0xA)
+    //   THUMB.13 ADD SP signed:  1011 0000 ...     ((instr & 0xFF00) == 0xB000)
+    //   THUMB.14 PUSH/POP:       1011 x10 R ...    ((instr & 0xF600) == 0xB400)
+    if ((instr & 0xF000u) == 0xA000u) {
+        return dispatch_thumb_add_pc_sp(state, bus, instr, instr_addr, pc_read, pc_literal);
+    }
+    if ((instr & 0xFF00u) == 0xB000u) {
+        return dispatch_thumb_add_sp_signed(state, bus, instr, instr_addr, pc_read, pc_literal);
+    }
     if ((instr & 0xF600u) == 0xB400u) {
         const bool is_pop = ((instr >> 11) & 1u) != 0;
         if (is_pop) {
@@ -80,16 +84,18 @@ u32 dispatch_thumb_101_space(
         }
         return dispatch_thumb_push(state, bus, instr, instr_addr, pc_read, pc_literal);
     }
-    if ((instr >> 12) == 0xAu) {
-        DS_LOG_WARN("arm7/thumb: 101_space[T.12] stub instr=0x%04X at 0x%08X", instr, instr_addr);
-        return 1;
-    }
-    DS_LOG_WARN("arm7/thumb: 101_space[T.13] stub instr=0x%04X at 0x%08X", instr, instr_addr);
+    DS_LOG_WARN("arm7/thumb: 101_space UNDEF instr=0x%04X at 0x%08X", instr, instr_addr);
     return 1;
 }
 
 u32 dispatch_thumb_110_space(
-    Arm7State&, Arm7Bus&, u16 instr, u32 instr_addr, u32 /*pc_read*/, u32 /*pc_literal*/) {
+    Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal) {
+    // bits[15:13] == 110. Two sub-families:
+    //   THUMB.15 LDMIA/STMIA:    1100 L Rb Rlist   (top nibble 0xC)
+    //   THUMB.16 Bcond / .17 SWI: 1101 ...         (warn stub below)
+    if ((instr >> 12) == 0xCu) {
+        return dispatch_thumb_ldmia_stmia(state, bus, instr, instr_addr, pc_read, pc_literal);
+    }
     DS_LOG_WARN("arm7/thumb: 110_space stub instr=0x%04X at 0x%08X", instr, instr_addr);
     return 1;
 }

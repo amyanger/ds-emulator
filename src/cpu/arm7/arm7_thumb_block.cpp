@@ -57,4 +57,29 @@ u32 dispatch_thumb_pop(Arm7State& state,
                                   instr_addr);
 }
 
+// THUMB.15 encoding: 1100 op1 Rb3 Rlist8 — LDMIA/STMIA Rb!, {Rlist}
+// Low regs only (no synthetic high bit, unlike PUSH/POP). Rb-in-list and
+// empty-Rlist semantics are inherited from execute_block_transfer.
+u32 dispatch_thumb_ldmia_stmia(Arm7State& state,
+                               Arm7Bus& bus,
+                               u16 instr,
+                               u32 instr_addr,
+                               u32 /*pc_read*/,
+                               u32 /*pc_literal*/) {
+    const u32 l_bit = (instr >> 11) & 1u;
+    const u32 rb = (instr >> 8) & 0x7u;
+    const u32 reg_list = instr & 0xFFu;
+    return execute_block_transfer(state,
+                                  bus,
+                                  static_cast<u32>(instr),
+                                  /*rn=*/rb,
+                                  reg_list,
+                                  /*p_bit=*/false,
+                                  /*u_bit=*/true,
+                                  /*s_bit=*/false,
+                                  /*w_bit=*/true,
+                                  /*l_bit=*/l_bit != 0u,
+                                  instr_addr);
+}
+
 } // namespace ds

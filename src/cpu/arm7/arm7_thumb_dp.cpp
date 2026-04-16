@@ -217,4 +217,46 @@ u32 dispatch_thumb_hireg_bx(
     }
 }
 
+// ---- THUMB.12 (bits[15:12] == 1010) ----
+// ADD Rd, PC, #imm8<<2  (op=0)  — load-effective-address from literal-pool PC
+// ADD Rd, SP, #imm8<<2  (op=1)  — load-effective-address from SP
+// CPSR is not modified.
+//
+// PC source MUST be `pc_literal` ((instr_addr + 4) & ~2), NOT `state.r[15]`.
+// state.r[15] equals instr_addr + 4 (== pc_read), which is unaligned when
+// instr_addr % 4 == 2 — using it would silently break every literal-pool
+// fetch from a Thumb instruction that landed on a non-word-aligned address.
+
+u32 dispatch_thumb_add_pc_sp(Arm7State& state,
+                             Arm7Bus& /*bus*/,
+                             u16 instr,
+                             u32 /*instr_addr*/,
+                             u32 /*pc_read*/,
+                             u32 pc_literal) {
+    const u32 op = (instr >> 11) & 1u;
+    const u32 rd = (instr >> 8) & 0x7u;
+    const u32 offset = (static_cast<u32>(instr) & 0xFFu) << 2;
+    const u32 source = (op == 0u) ? pc_literal : state.r[13];
+    write_rd(state, rd, source + offset);
+    return 1;
+}
+
+// ---- THUMB.13 (bits[15:8] == 10110000) ----
+// ADD SP, #imm7<<2  (S=0)  — SP += offset
+// SUB SP, #imm7<<2  (S=1)  — SP -= offset
+// CPSR is not modified. Rd is implicitly R13 — no Rd field in the encoding.
+
+u32 dispatch_thumb_add_sp_signed(Arm7State& state,
+                                 Arm7Bus& /*bus*/,
+                                 u16 instr,
+                                 u32 /*instr_addr*/,
+                                 u32 /*pc_read*/,
+                                 u32 /*pc_literal*/) {
+    const u32 s_bit = (instr >> 7) & 1u;
+    const u32 offset = (static_cast<u32>(instr) & 0x7Fu) << 2;
+    const u32 sp = state.r[13];
+    write_rd(state, 13, (s_bit != 0u) ? (sp - offset) : (sp + offset));
+    return 1;
+}
+
 } // namespace ds

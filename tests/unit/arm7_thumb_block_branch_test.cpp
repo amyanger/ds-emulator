@@ -23,6 +23,22 @@ static u16 thumb14(u32 op, u32 r_bit, u32 rlist8) {
                             (rlist8 & 0xFFu));
 }
 
+// THUMB.15: 1100 op1 Rb3 Rlist8
+//   op = 0 -> STMIA, op = 1 -> LDMIA
+static u16 thumb15(u32 op, u32 rb, u32 rlist8) {
+    return static_cast<u16>((0b1100u << 12) | (op << 11) | ((rb & 0x7u) << 8) | (rlist8 & 0xFFu));
+}
+
+// THUMB.12: 1010 op1 Rd3 imm8 — ADD Rd, (PC|SP), #imm8<<2
+static u16 thumb12(u32 op, u32 rd, u32 imm8) {
+    return static_cast<u16>((0b1010u << 12) | (op << 11) | ((rd & 0x7u) << 8) | (imm8 & 0xFFu));
+}
+
+// THUMB.13: 10110000 S imm7 — ADD/SUB SP, #imm7<<2
+static u16 thumb13(u32 s, u32 imm7) {
+    return static_cast<u16>((0b10110000u << 8) | (s << 7) | (imm7 & 0x7Fu));
+}
+
 // Instruction stream base — ARM7 WRAM, same region used by every other
 // ARM7 test. SP_BASE lives a separate page over so the PUSH/POP
 // transfers can't alias the fetched opcode.
@@ -196,6 +212,193 @@ static void push_then_pop_round_trips_r0_r3_and_lr_pc() {
     REQUIRE(nds.cpu7().state().r[13] == sp_before); // SP fully restored
 }
 
+// ==== THUMB.15 LDMIA / STMIA ====
+
+// STMIA r3!, {r0,r1,r2}. Memory is filled low-reg-to-low-address; Rb
+// auto-increments by 4 * count.
+static void stmia_round_trip_low_regs() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb15(0, 3, 0b0000'0111));
+    setup_thumb(nds, BASE);
+    const u32 base = SP_BASE;
+    nds.cpu7().state().r[0] = 0xAu;
+    nds.cpu7().state().r[1] = 0xBu;
+    nds.cpu7().state().r[2] = 0xCu;
+    nds.cpu7().state().r[3] = base;
+    step_one(nds);
+
+    REQUIRE(nds.arm7_bus().read32(base + 0) == 0xAu);
+    REQUIRE(nds.arm7_bus().read32(base + 4) == 0xBu);
+    REQUIRE(nds.arm7_bus().read32(base + 8) == 0xCu);
+    REQUIRE(nds.cpu7().state().r[3] == base + 12u);
+}
+
+// LDMIA r3!, {r0,r1,r2}. Loads land low-reg-from-low-address; Rb
+// auto-increments by 4 * count.
+static void ldmia_round_trip_low_regs() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb15(1, 3, 0b0000'0111));
+    setup_thumb(nds, BASE);
+    const u32 base = SP_BASE;
+    nds.arm7_bus().write32(base + 0, 0x11u);
+    nds.arm7_bus().write32(base + 4, 0x22u);
+    nds.arm7_bus().write32(base + 8, 0x33u);
+    nds.cpu7().state().r[3] = base;
+    step_one(nds);
+
+    REQUIRE(nds.cpu7().state().r[0] == 0x11u);
+    REQUIRE(nds.cpu7().state().r[1] == 0x22u);
+    REQUIRE(nds.cpu7().state().r[2] == 0x33u);
+    REQUIRE(nds.cpu7().state().r[3] == base + 12u);
+}
+
+// STMIA r0!, {r0,r1,r2}. Rb is the LOWEST listed register: ARMv4 stores
+// the OLD base on the first iteration, then writeback applies as usual.
+static void stmia_rb_in_list_lowest_stores_old_base() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb15(0, 0, 0b0000'0111));
+    setup_thumb(nds, BASE);
+    const u32 base = SP_BASE;
+    nds.cpu7().state().r[0] = base;
+    nds.cpu7().state().r[1] = 0xBBu;
+    nds.cpu7().state().r[2] = 0xCCu;
+    step_one(nds);
+
+    REQUIRE(nds.arm7_bus().read32(base + 0) == base); // OLD r0
+    REQUIRE(nds.arm7_bus().read32(base + 4) == 0xBBu);
+    REQUIRE(nds.arm7_bus().read32(base + 8) == 0xCCu);
+    REQUIRE(nds.cpu7().state().r[0] == base + 12u);
+}
+
+// STMIA r2!, {r0,r1,r2}. Rb is NOT the lowest listed register: ARMv4
+// applies the writeback EARLY (before the loop), so the i==Rb iteration
+// stores the NEW (post-writeback) base.
+static void stmia_rb_in_list_not_lowest_stores_new_base() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb15(0, 2, 0b0000'0111));
+    setup_thumb(nds, BASE);
+    const u32 base = SP_BASE;
+    nds.cpu7().state().r[0] = 0xAAu;
+    nds.cpu7().state().r[1] = 0xBBu;
+    nds.cpu7().state().r[2] = base;
+    step_one(nds);
+
+    REQUIRE(nds.arm7_bus().read32(base + 0) == 0xAAu);
+    REQUIRE(nds.arm7_bus().read32(base + 4) == 0xBBu);
+    REQUIRE(nds.arm7_bus().read32(base + 8) == base + 12u); // NEW r2
+    REQUIRE(nds.cpu7().state().r[2] == base + 12u);
+}
+
+// LDMIA r1!, {r0,r1,r2}. ARMv4 LDM with Rb in the list suppresses the
+// end-of-instruction writeback — the loaded word into r1 wins.
+static void ldmia_rb_in_list_no_writeback() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb15(1, 1, 0b0000'0111));
+    setup_thumb(nds, BASE);
+    const u32 base = SP_BASE;
+    nds.arm7_bus().write32(base + 0, 0x11u);
+    nds.arm7_bus().write32(base + 4, 0x77u);
+    nds.arm7_bus().write32(base + 8, 0x33u);
+    nds.cpu7().state().r[1] = base;
+    step_one(nds);
+
+    REQUIRE(nds.cpu7().state().r[0] == 0x11u);
+    REQUIRE(nds.cpu7().state().r[1] == 0x77u); // loaded value, not base + 12
+    REQUIRE(nds.cpu7().state().r[2] == 0x33u);
+}
+
+// LDMIA r0!, {} — empty Rlist. execute_block_transfer warns and no-ops;
+// neither memory nor Rb should change.
+static void ldmia_empty_rlist_warn_and_noop() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb15(1, 0, 0));
+    setup_thumb(nds, BASE);
+    const u32 base = SP_BASE;
+    nds.cpu7().state().r[0] = base;
+    nds.cpu7().state().r[1] = 0xDEAD'BEEFu;
+    step_one(nds);
+
+    REQUIRE(nds.cpu7().state().r[0] == base);         // unchanged
+    REQUIRE(nds.cpu7().state().r[1] == 0xDEAD'BEEFu); // untouched
+}
+
+// ==== THUMB.12 ADD Rd, PC/SP, #imm8<<2 ====
+
+// ADD r1, PC, #16 at a word-aligned instruction address.
+// pc_literal = (BASE + 4) & ~2 = BASE + 4 (since BASE is 4-aligned).
+// Result: r1 == BASE + 4 + 16. CPSR untouched.
+static void add_pc_aligned_instr_addr() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb12(0, 1, 4));
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[1] = 0;
+    const u32 cpsr_before = nds.cpu7().state().cpsr;
+    step_one(nds);
+
+    REQUIRE(nds.cpu7().state().r[1] == BASE + 4u + 16u);
+    REQUIRE(nds.cpu7().state().cpsr == cpsr_before);
+}
+
+// ADD r1, PC, #16 at a misaligned instruction address (instr_addr % 4 == 2).
+// The handler MUST use pc_literal = (instr_addr + 4) & ~2, NOT state.r[15]
+// (which equals instr_addr + 4, unaligned). For instr_addr = BASE + 2:
+//   pc_literal = (BASE + 2 + 4) & ~2 = BASE + 4
+//   pc_read    = BASE + 6                (would give the WRONG result)
+// Expected r1 = BASE + 4 + 16 = BASE + 20.  A bug-using-state.r[15]
+// implementation would yield BASE + 22 — observable difference of 2.
+static void add_pc_misaligned_instr_addr_uses_literal_align() {
+    NDS nds;
+    const u32 addr = BASE + 2;
+    nds.arm7_bus().write16(addr, thumb12(0, 1, 4));
+    setup_thumb(nds, addr);
+    nds.cpu7().state().r[1] = 0;
+    step_one(nds);
+
+    REQUIRE(nds.cpu7().state().r[1] == BASE + 4u + 16u);
+}
+
+// ADD r4, SP, #32. CPSR untouched.
+static void add_sp_imm() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb12(1, 4, 8));
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[4] = 0;
+    nds.cpu7().state().r[13] = 0x1000'0000u;
+    const u32 cpsr_before = nds.cpu7().state().cpsr;
+    step_one(nds);
+
+    REQUIRE(nds.cpu7().state().r[4] == 0x1000'0020u);
+    REQUIRE(nds.cpu7().state().cpsr == cpsr_before);
+}
+
+// ==== THUMB.13 ADD/SUB SP, #imm7<<2 ====
+
+// ADD SP, #16 (S=0). CPSR untouched.
+static void add_sp_positive() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb13(0, 4));
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[13] = 0x1000'0000u;
+    const u32 cpsr_before = nds.cpu7().state().cpsr;
+    step_one(nds);
+
+    REQUIRE(nds.cpu7().state().r[13] == 0x1000'0010u);
+    REQUIRE(nds.cpu7().state().cpsr == cpsr_before);
+}
+
+// SUB SP, #16 (S=1). CPSR untouched.
+static void add_sp_negative() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb13(1, 4));
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[13] = 0x1000'0010u;
+    const u32 cpsr_before = nds.cpu7().state().cpsr;
+    step_one(nds);
+
+    REQUIRE(nds.cpu7().state().r[13] == 0x1000'0000u);
+    REQUIRE(nds.cpu7().state().cpsr == cpsr_before);
+}
+
 int main() {
     push_r0_r1_full_descending();
     push_with_lr_bit_stores_lr_at_highest_address();
@@ -204,5 +407,16 @@ int main() {
     pop_with_pc_bit_loads_pc_and_stays_in_thumb();
     pop_pc_with_low_bit_set_word_aligns();
     push_then_pop_round_trips_r0_r3_and_lr_pc();
+    stmia_round_trip_low_regs();
+    ldmia_round_trip_low_regs();
+    stmia_rb_in_list_lowest_stores_old_base();
+    stmia_rb_in_list_not_lowest_stores_new_base();
+    ldmia_rb_in_list_no_writeback();
+    ldmia_empty_rlist_warn_and_noop();
+    add_pc_aligned_instr_addr();
+    add_pc_misaligned_instr_addr_uses_literal_align();
+    add_sp_imm();
+    add_sp_positive();
+    add_sp_negative();
     return 0;
 }

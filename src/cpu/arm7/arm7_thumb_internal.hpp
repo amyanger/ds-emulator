@@ -76,6 +76,21 @@ u32 dispatch_thumb_push(
 u32 dispatch_thumb_pop(
     Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
 
+// THUMB.15 LDMIA/STMIA (low-reg multi-load/store with auto-increment).
+// Defined in arm7_thumb_block.cpp.
+u32 dispatch_thumb_ldmia_stmia(
+    Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
+
+// THUMB.12 ADD Rd, PC/SP, #imm8<<2 (literal-pool / SP load-effective-address).
+// Defined in arm7_thumb_dp.cpp.
+u32 dispatch_thumb_add_pc_sp(
+    Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
+
+// THUMB.13 ADD/SUB SP, #imm7<<2 (signed SP adjust).
+// Defined in arm7_thumb_dp.cpp.
+u32 dispatch_thumb_add_sp_signed(
+    Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
+
 u32 dispatch_thumb_ldst_imm_wb(
     Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
 u32 dispatch_thumb_100_space(
