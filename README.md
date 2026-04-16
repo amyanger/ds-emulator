@@ -38,22 +38,6 @@ The DS isn't "GBA + more" — it's a fundamentally different machine, so the arc
 
 ---
 
-## 🏛️ Non-Negotiable Architecture Rules
-
-These come straight from the design spec and are enforced in code review:
-
-1. ⏱️ **The scheduler is the clock.** Nothing advances time except `scheduler.run_until(t)`. Subsystems never sleep, wait, or run their own time loops.
-2. 🧠 **Two bus domains, not one.** ARM9 and ARM7 each model their own view of memory. The same physical address can mean different things to each CPU.
-3. 🌳 **No subsystem holds a pointer to another subsystem.** All cross-subsystem access goes through `NDS&`. The dependency graph is a tree.
-4. 🔌 **I/O is routed per-bus.** ARM9 I/O and ARM7 I/O are different tables.
-5. 💾 **Every subsystem implements `reset()`, `save_state()`, `load_state()`** from day one. Save states are not a bolt-on.
-6. 🪟 **`class NDS` has no `<SDL.h>` in its transitive include graph.** Core is platform-free; this is enforced at link time.
-7. 📁 **One hardware component per file.** When a file exceeds ~800 lines, split it by concern.
-8. 🧮 **`Fixed<I, F>` for all 3D math.** Raw `int32_t` in the geometry pipeline is a code review block.
-9. 🚀 **Direct boot only.** No BIOS / firmware dumps. If you want to load `bios9.bin`, you're solving the wrong problem — add the missing SWI to the HLE layer instead.
-
----
-
 ## 🚀 Build & Run
 
 ### 📦 Dependencies
