@@ -91,19 +91,32 @@ u32 dispatch_thumb_101_space(
 u32 dispatch_thumb_110_space(
     Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal) {
     // bits[15:13] == 110. Two sub-families:
-    //   THUMB.15 LDMIA/STMIA:    1100 L Rb Rlist   (top nibble 0xC)
-    //   THUMB.16 Bcond / .17 SWI: 1101 ...         (warn stub below)
+    //   THUMB.15 LDMIA/STMIA:     1100 L Rb Rlist   (top nibble 0xC)
+    //   THUMB.16 Bcond / .17 SWI: 1101 ...          (cond 0xF → SWI)
     if ((instr >> 12) == 0xCu) {
         return dispatch_thumb_ldmia_stmia(state, bus, instr, instr_addr, pc_read, pc_literal);
     }
-    DS_LOG_WARN("arm7/thumb: 110_space stub instr=0x%04X at 0x%08X", instr, instr_addr);
-    return 1;
+    return dispatch_thumb_bcond_swi(state, bus, instr, instr_addr, pc_read, pc_literal);
 }
 
 u32 dispatch_thumb_111_space(
-    Arm7State&, Arm7Bus&, u16 instr, u32 instr_addr, u32 /*pc_read*/, u32 /*pc_literal*/) {
-    DS_LOG_WARN("arm7/thumb: 111_space stub instr=0x%04X at 0x%08X", instr, instr_addr);
-    return 1;
+    Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal) {
+    // bits[15:13] == 111. Four sub-forms by bits[12:11]:
+    //   00 → THUMB.18 B unconditional
+    //   01 → THUMB.19 BLX suffix (ARMv5 only — UNDEF on ARMv4)
+    //   10 → THUMB.19 BL prefix  (first halfword, sets LR)
+    //   11 → THUMB.19 BL suffix  (second halfword, branches via LR)
+    const u32 form = (instr >> 11) & 0x3u;
+    switch (form) {
+    case 0b00u:
+        return dispatch_thumb_b_uncond(state, bus, instr, instr_addr, pc_read, pc_literal);
+    case 0b10u:
+        return dispatch_thumb_bl_prefix(state, bus, instr, instr_addr, pc_read, pc_literal);
+    case 0b01u:
+    case 0b11u:
+        return dispatch_thumb_bl_suffix(state, bus, instr, instr_addr, pc_read, pc_literal);
+    }
+    return 1; // unreachable — form is a 2-bit value
 }
 
 u32 dispatch_thumb(Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr) {

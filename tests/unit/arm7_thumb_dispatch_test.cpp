@@ -36,11 +36,28 @@ static void thumb_dispatch_covers_all_eight_buckets() {
     const u32 base = 0x0380'0000u;
 
     // One halfword per bucket. bits[15:13] walks 0..7.
-    // Each encoding is just the bucket selector in bits 15:13 with
-    // zeroes elsewhere. Every one hits a warn stub and returns 1 cycle.
+    // Each encoding is chosen so it either warns (stub family) or is a
+    // deterministic non-branching no-op — PC must advance by exactly 2
+    // regardless of which bucket is hit.
+    //   buckets 0..5: the bare bucket selector is a harmless shift/add/dp
+    //                 or load-store encoding that advances PC by 2.
+    //   bucket 6 (0xC000): THUMB.15 STMIA r0, {} — empty list no-op.
+    //   bucket 7 (0xE800): THUMB.19 second halfword with form bits 01 —
+    //                      BLX suffix, ARMv5-only, warn stub that does
+    //                      not touch PC or LR. (0xE000 would be THUMB.18
+    //                      B #0 which self-loops, hence the 0xE800 choice.)
+    const u16 bucket_encoding[8] = {
+        0x0000u, // 000
+        0x2000u, // 001
+        0x4000u, // 010
+        0x6000u, // 011
+        0x8000u, // 100
+        0xA000u, // 101
+        0xC000u, // 110 — STMIA r0, {} empty list
+        0xE800u, // 111 — BLX suffix warn stub (no branch)
+    };
     for (u32 bucket = 0; bucket < 8; ++bucket) {
-        const u16 instr = static_cast<u16>(bucket << 13);
-        nds.arm7_bus().write16(base + bucket * 2, instr);
+        nds.arm7_bus().write16(base + bucket * 2, bucket_encoding[bucket]);
     }
 
     nds.cpu7().state().pc = base;

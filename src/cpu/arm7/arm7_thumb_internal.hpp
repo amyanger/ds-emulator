@@ -102,4 +102,24 @@ u32 dispatch_thumb_110_space(
 u32 dispatch_thumb_111_space(
     Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
 
+// THUMB.16 Bcond + THUMB.17 SWI warn stub (both live in the 1101xxxx space).
+// Defined in arm7_thumb_branch.cpp.
+u32 dispatch_thumb_bcond_swi(
+    Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
+
+// THUMB.18 B unconditional (11100 imm11).
+// Defined in arm7_thumb_branch.cpp.
+u32 dispatch_thumb_b_uncond(
+    Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
+
+// THUMB.19 BL first halfword (11110 imm11_hi) — sets LR.
+// Defined in arm7_thumb_branch.cpp.
+u32 dispatch_thumb_bl_prefix(
+    Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
+
+// THUMB.19 BL / BLX second halfword. BL (11111) branches via LR; BLX (11101)
+// is ARMv5 only and warns on ARMv4. Defined in arm7_thumb_branch.cpp.
+u32 dispatch_thumb_bl_suffix(
+    Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
+
 } // namespace ds

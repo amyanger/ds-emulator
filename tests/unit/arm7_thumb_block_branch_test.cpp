@@ -11,8 +11,11 @@
 
 #include "bus/arm7_bus.hpp"
 #include "cpu/arm7/arm7.hpp"
+#include "cpu/arm7/arm7_state.hpp"
 #include "nds.hpp"
 #include "require.hpp"
+
+#include <cstddef>
 
 using namespace ds;
 
@@ -37,6 +40,43 @@ static u16 thumb12(u32 op, u32 rd, u32 imm8) {
 // THUMB.13: 10110000 S imm7 — ADD/SUB SP, #imm7<<2
 static u16 thumb13(u32 s, u32 imm7) {
     return static_cast<u16>((0b10110000u << 8) | (s << 7) | (imm7 & 0x7Fu));
+}
+
+// THUMB.16: 1101 cond4 imm8 — Bcond
+static u16 thumb16(u32 cond, u32 imm8) {
+    return static_cast<u16>((0b1101u << 12) | ((cond & 0xFu) << 8) | (imm8 & 0xFFu));
+}
+// THUMB.17: 11011111 imm8  (cond = 0xF route of THUMB.16) — SWI
+static u16 thumb17(u32 imm8) {
+    return thumb16(0xFu, imm8);
+}
+// THUMB.18: 11100 imm11 — B unconditional
+static u16 thumb18(u32 imm11) {
+    return static_cast<u16>((0b11100u << 11) | (imm11 & 0x7FFu));
+}
+// THUMB.19 first halfword: 11110 imm11_hi — BL prefix
+static u16 thumb19_hi(u32 imm11_hi) {
+    return static_cast<u16>((0b11110u << 11) | (imm11_hi & 0x7FFu));
+}
+// THUMB.19 second halfword BL: 11111 imm11_lo
+static u16 thumb19_lo(u32 imm11_lo) {
+    return static_cast<u16>((0b11111u << 11) | (imm11_lo & 0x7FFu));
+}
+// THUMB.19 second halfword BLX (ARMv5): 11101 imm11_lo — UNDEF on ARMv4
+static u16 thumb19_lo_blx(u32 imm11_lo) {
+    return static_cast<u16>((0b11101u << 11) | (imm11_lo & 0x7FFu));
+}
+
+// CPSR flag helpers.
+static constexpr u32 CPSR_N = 1u << 31;
+static constexpr u32 CPSR_Z = 1u << 30;
+static constexpr u32 CPSR_C = 1u << 29;
+static constexpr u32 CPSR_V = 1u << 28;
+
+// Overwrite only the NZCV bits of CPSR. Preserves T and mode bits.
+static void set_flags(NDS& nds, u32 nzcv) {
+    auto& s = nds.cpu7().state();
+    s.cpsr = (s.cpsr & ~0xF000'0000u) | (nzcv & 0xF000'0000u);
 }
 
 // Instruction stream base — ARM7 WRAM, same region used by every other
@@ -399,6 +439,272 @@ static void add_sp_negative() {
     REQUIRE(nds.cpu7().state().cpsr == cpsr_before);
 }
 
+// ==== THUMB.16 Bcond ====
+
+// BEQ #+4 with Z=1: taken. imm8=2 (halfwords * 2 = +4 bytes).
+static void bcond_eq_taken_when_z_set() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb16(0x0u, 2)); // BEQ +4
+    setup_thumb(nds, BASE);
+    set_flags(nds, CPSR_Z);
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().pc == BASE + 4u + 4u);
+}
+
+// BEQ with Z=0: not taken — PC advances by 2 only.
+static void bcond_eq_not_taken_when_z_clear() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb16(0x0u, 2));
+    setup_thumb(nds, BASE);
+    set_flags(nds, 0u);
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().pc == BASE + 2u);
+}
+
+// For each cond in 0x0..0xD: exercise both "met" and "not met" flag
+// states and verify the branch is (not) taken. Encodes the same "NZCV
+// required to satisfy this cond" table as eval_condition without
+// re-importing the function.
+static void bcond_every_cond_code_0_to_d() {
+    struct Case {
+        u32 cond;
+        u32 satisfying_flags;
+        u32 violating_flags;
+    };
+    // Each entry picks a single flag state that satisfies the condition
+    // and one that violates it. Match eval_condition (arm7_alu.hpp).
+    const Case cases[] = {
+        {0x0u, CPSR_Z, 0u},              // EQ:  z
+        {0x1u, 0u, CPSR_Z},              // NE:  !z
+        {0x2u, CPSR_C, 0u},              // CS:  c
+        {0x3u, 0u, CPSR_C},              // CC:  !c
+        {0x4u, CPSR_N, 0u},              // MI:  n
+        {0x5u, 0u, CPSR_N},              // PL:  !n
+        {0x6u, CPSR_V, 0u},              // VS:  v
+        {0x7u, 0u, CPSR_V},              // VC:  !v
+        {0x8u, CPSR_C, CPSR_Z},          // HI:  c && !z
+        {0x9u, CPSR_Z, CPSR_C},          // LS:  !c || z
+        {0xAu, CPSR_N | CPSR_V, CPSR_N}, // GE:  n == v
+        {0xBu, CPSR_N, CPSR_N | CPSR_V}, // LT:  n != v
+        {0xCu, CPSR_N | CPSR_V, CPSR_Z}, // GT:  !z && n == v
+        {0xDu, CPSR_Z, CPSR_N | CPSR_V}, // LE:  z || n != v
+    };
+    for (const auto& c : cases) {
+        // Taken path.
+        {
+            NDS nds;
+            nds.arm7_bus().write16(BASE, thumb16(c.cond, 2));
+            setup_thumb(nds, BASE);
+            set_flags(nds, c.satisfying_flags);
+            step_one(nds);
+            REQUIRE(nds.cpu7().state().pc == BASE + 4u + 4u);
+        }
+        // Not-taken path.
+        {
+            NDS nds;
+            nds.arm7_bus().write16(BASE, thumb16(c.cond, 2));
+            setup_thumb(nds, BASE);
+            set_flags(nds, c.violating_flags);
+            step_one(nds);
+            REQUIRE(nds.cpu7().state().pc == BASE + 2u);
+        }
+    }
+}
+
+// BNE with imm8 = 0xFE (sign-extend = -2). Offset = -2 * 2 = -4.
+// Target = instr_addr + 4 + (-4) = instr_addr. Z=0 so taken.
+static void bcond_backward_negative_offset() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb16(0x1u, 0xFEu));
+    setup_thumb(nds, BASE);
+    set_flags(nds, 0u);
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().pc == BASE);
+}
+
+// imm8 = 0x7F → max positive offset = +254 bytes.
+static void bcond_max_positive_offset() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb16(0x1u, 0x7Fu));
+    setup_thumb(nds, BASE);
+    set_flags(nds, 0u); // NE
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().pc == BASE + 4u + 254u);
+}
+
+// imm8 = 0x80 → max negative offset = -256 bytes.
+static void bcond_max_negative_offset() {
+    NDS nds;
+    // Start well away from zero so the subtract doesn't wrap below the
+    // bus's test region.
+    const u32 here = BASE + 0x400u;
+    nds.arm7_bus().write16(here, thumb16(0x1u, 0x80u));
+    setup_thumb(nds, here);
+    set_flags(nds, 0u); // NE
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().pc == here + 4u - 256u);
+}
+
+// cond=0xE is the "always" slot, reserved as UNDEF in the Bcond encoding.
+// Warn stub: PC advances by 2, CPSR and all registers unchanged.
+static void bcond_cond_e_undef_warn_stub() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb16(0xEu, 0x12u));
+    setup_thumb(nds, BASE);
+    nds.cpu7().state().r[0] = 0xA5A5'A5A5u;
+    const u32 cpsr_before = nds.cpu7().state().cpsr;
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().pc == BASE + 2u);
+    REQUIRE(nds.cpu7().state().cpsr == cpsr_before);
+    REQUIRE(nds.cpu7().state().r[0] == 0xA5A5'A5A5u);
+}
+
+// ==== THUMB.17 SWI ====
+
+// Risk 5 guard: the warn stub MUST leave CPSR, R14_svc, SPSR_svc, mode,
+// and every banked register byte-identical to pre-SWI. Only PC advances.
+static void swi_is_warn_stub_preserves_state() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb17(0x12u));
+    setup_thumb(nds, BASE);
+
+    auto& s = nds.cpu7().state();
+    // Seed a recognisable pattern in svc banked storage and in current mode's
+    // visible regs. If SWI leaked any partial dispatch (mode switch, LR
+    // overwrite, SPSR save), one of these snapshots would diverge.
+    s.banks.svc_r13_r14[0] = 0x1111'2222u; // R13_svc
+    s.banks.svc_r13_r14[1] = 0x3333'4444u; // R14_svc
+    s.banks.spsr_svc = 0x5555'6666u;
+    s.r[13] = 0x0380'0500u;
+    s.r[14] = 0xAABB'CCDDu;
+
+    const Arm7Banks banks_before = s.banks;
+    const u32 cpsr_before = s.cpsr;
+    const auto regs_before = s.r;
+
+    step_one(nds);
+
+    REQUIRE(s.pc == BASE + 2u);
+    REQUIRE(s.cpsr == cpsr_before);
+    REQUIRE(s.banks.svc_r13_r14[0] == banks_before.svc_r13_r14[0]);
+    REQUIRE(s.banks.svc_r13_r14[1] == banks_before.svc_r13_r14[1]);
+    REQUIRE(s.banks.spsr_svc == banks_before.spsr_svc);
+    for (std::size_t i = 0; i < 16; ++i) {
+        if (i == 15)
+            continue; // R15 is pipeline-managed
+        REQUIRE(s.r[i] == regs_before[i]);
+    }
+}
+
+// ==== THUMB.18 B unconditional ====
+
+// B #+4 forward.
+static void b_uncond_forward() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb18(2));
+    setup_thumb(nds, BASE);
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().pc == BASE + 4u + 4u);
+}
+
+// B with imm11=0x7FE (sext = -2) → offset = -4 → target = instr_addr.
+static void b_uncond_backward() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb18(0x7FEu));
+    setup_thumb(nds, BASE);
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().pc == BASE);
+}
+
+// imm11=0x3FF → +2046 bytes from instr_addr + 4.
+static void b_uncond_max_positive() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb18(0x3FFu));
+    setup_thumb(nds, BASE);
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().pc == BASE + 4u + 2046u);
+}
+
+// imm11=0x400 → sext = -1024 → -2048 bytes.
+static void b_uncond_max_negative() {
+    NDS nds;
+    const u32 here = BASE + 0x1000u;
+    nds.arm7_bus().write16(here, thumb18(0x400u));
+    setup_thumb(nds, here);
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().pc == here + 4u - 2048u);
+}
+
+// ==== THUMB.19 BL ====
+
+// Full BL: two halfwords at instr_addr A and A+2. Second halfword records
+// LR = (A+2+2) | 1, then branches to LR_from_prefix + (imm11_lo << 1).
+static void bl_both_halves_target_and_return() {
+    NDS nds;
+    const u32 A = BASE;
+    // imm11_hi = 0 → LR_pref = (A+4) + 0 = A+4.
+    // imm11_lo = 4 → target = (A+4) + (4 << 1) = A + 12.
+    nds.arm7_bus().write16(A + 0, thumb19_hi(0));
+    nds.arm7_bus().write16(A + 2, thumb19_lo(4));
+    setup_thumb(nds, A);
+
+    // Step prefix.
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().r[14] == A + 4u);
+    REQUIRE(nds.cpu7().state().pc == A + 2u);
+
+    // Step suffix.
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().pc == A + 12u);
+    // Return address = next instr after BL suffix = A + 4, with Thumb bit.
+    REQUIRE(nds.cpu7().state().r[14] == ((A + 4u) | 1u));
+}
+
+// Risk 4: games emit a bare second halfword as "BL LR+imm" after
+// pre-staging LR externally. Verify imm11_lo = 4 case with pre-staged LR.
+static void bl_second_halfword_alone_uses_prestaged_lr() {
+    NDS nds;
+    const u32 A = BASE;
+    const u32 prestaged_lr = 0x0380'2000u;
+    nds.arm7_bus().write16(A, thumb19_lo(4));
+    setup_thumb(nds, A);
+    nds.cpu7().state().r[14] = prestaged_lr;
+
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().pc == prestaged_lr + 8u);
+    REQUIRE(nds.cpu7().state().r[14] == ((A + 2u) | 1u));
+}
+
+// Same idiom with imm11_lo = 0 — the exact 0xF800 "BL LR+0" encoding.
+static void bl_second_halfword_alone_imm_zero() {
+    NDS nds;
+    const u32 A = BASE;
+    const u32 prestaged_lr = 0x0380'3000u;
+    nds.arm7_bus().write16(A, thumb19_lo(0));
+    setup_thumb(nds, A);
+    nds.cpu7().state().r[14] = prestaged_lr;
+
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().pc == prestaged_lr);
+    REQUIRE(nds.cpu7().state().r[14] == ((A + 2u) | 1u));
+}
+
+// BLX suffix (ARMv5) — UNDEF on ARMv4. Warn stub: PC advances by 2,
+// LR/CPSR unchanged.
+static void bl_blx_suffix_undef_warn_stub() {
+    NDS nds;
+    nds.arm7_bus().write16(BASE, thumb19_lo_blx(4));
+    setup_thumb(nds, BASE);
+    const u32 lr_before = 0x1234'5678u;
+    nds.cpu7().state().r[14] = lr_before;
+    const u32 cpsr_before = nds.cpu7().state().cpsr;
+
+    step_one(nds);
+    REQUIRE(nds.cpu7().state().pc == BASE + 2u);
+    REQUIRE(nds.cpu7().state().r[14] == lr_before);
+    REQUIRE(nds.cpu7().state().cpsr == cpsr_before);
+}
+
 int main() {
     push_r0_r1_full_descending();
     push_with_lr_bit_stores_lr_at_highest_address();
@@ -418,5 +724,21 @@ int main() {
     add_sp_imm();
     add_sp_positive();
     add_sp_negative();
+    bcond_eq_taken_when_z_set();
+    bcond_eq_not_taken_when_z_clear();
+    bcond_every_cond_code_0_to_d();
+    bcond_backward_negative_offset();
+    bcond_max_positive_offset();
+    bcond_max_negative_offset();
+    bcond_cond_e_undef_warn_stub();
+    swi_is_warn_stub_preserves_state();
+    b_uncond_forward();
+    b_uncond_backward();
+    b_uncond_max_positive();
+    b_uncond_max_negative();
+    bl_both_halves_target_and_return();
+    bl_second_halfword_alone_uses_prestaged_lr();
+    bl_second_halfword_alone_imm_zero();
+    bl_blx_suffix_undef_warn_stub();
     return 0;
 }
