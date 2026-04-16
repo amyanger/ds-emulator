@@ -31,6 +31,11 @@ public:
     // is pending. The CPU samples this level at instruction boundaries.
     bool line() const { return (ime_ & 1u) != 0 && (ie_ & if_) != 0; }
 
+    // True iff any enabled interrupt source is pending. Unlike line(), this
+    // does NOT gate on IME — the NDS7 HALTCNT halt wakes whenever (IE AND IF)
+    // != 0 per GBATEK, regardless of IME or CPSR.I.
+    bool halt_wake_pending() const { return (ie_ & if_) != 0; }
+
 private:
     u32 ime_ = 0;
     u32 ie_ = 0;

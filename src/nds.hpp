@@ -58,12 +58,11 @@ private:
     // map to behavior. NDS owns this switch (scheduler is a pure data structure).
     void on_scheduler_event(const Event& ev);
 
-    // Recompute the ARM7 IRQ line from the controller state and push it into
-    // the CPU. Called after every write that can change IME/IE/IF and after
-    // reset. Keeping this glue in NDS — rather than giving the controller an
-    // Arm7& pointer — preserves the non-negotiable rule that no subsystem
-    // holds a pointer to another.
-    void update_arm7_irq_line();
+    // Push both IRQ-derived signals into the CPU: the IRQ line and the
+    // halt-wake-pending bit. Called after every write that can change
+    // IME/IE/IF and after reset. Lives here (not on the controller) because
+    // no subsystem may hold a pointer to another (rule 3).
+    void update_arm7_irq_signals();
 
     Scheduler scheduler_;
     Arm9 cpu9_;

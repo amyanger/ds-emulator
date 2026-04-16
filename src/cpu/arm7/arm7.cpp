@@ -1,6 +1,5 @@
 #include "cpu/arm7/arm7.hpp"
 
-#include "bus/arm7_bus.hpp"
 #include "cpu/arm7/arm7_exception.hpp"
 
 #include <cassert>
@@ -14,15 +13,32 @@ void Arm7::reset() {
     assert(bus_ != nullptr && "Arm7::reset called before attach_bus");
     state_.reset();
     // The pipeline invariant is "no pending IRQ at boot". NDS will push the
-    // real initial level (false) after reset via update_arm7_irq_line, but
+    // real initial level (false) after reset via update_arm7_irq_signals, but
     // reset the field here too so the CPU is coherent even if instantiated
     // without an NDS wrapper (tests may do this).
     irq_line_ = false;
+    halted_ = false;
+    halt_wake_pending_ = false;
 }
 
 void Arm7::run_until(Cycle arm9_target) {
     const Cycle arm7_target = arm9_target / 2;
     while (state_.cycles < arm7_target) {
+        if (halted_) {
+            if (halt_wake_pending_) {
+                // Wake first, then fall through. If IME=1 and CPSR.I=0, the
+                // IRQ sample below enters the vector; otherwise the CPU just
+                // resumes normal stepping — both match GBATEK "IME is
+                // don't care for wake".
+                halted_ = false;
+            } else {
+                // Halted with no wake pending: skip the quantum. The next
+                // IRQ-register write will re-push halt_wake_pending_ before
+                // the next run_until call.
+                state_.cycles = arm7_target;
+                return;
+            }
+        }
         // ARMv4T samples nIRQ at instruction boundaries only. Sampling here,
         // before step_*, keeps the interpreter's pipeline model clean: the
         // step methods never see an in-flight IRQ. Level-sensitive — if the

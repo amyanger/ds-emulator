@@ -24,6 +24,16 @@ public:
     void set_irq_line(bool level) { irq_line_ = level; }
     bool irq_line() const { return irq_line_; }
 
+    // HALTCNT halt state. Set true by NDS when the game writes HALTCNT with
+    // Power Down Mode 2 (Halt) or 3 (Sleep; treated as halt this slice).
+    // Cleared in run_until when halt_wake_pending_ asserts.
+    void set_halted(bool halted) { halted_ = halted; }
+    bool is_halted() const { return halted_; }
+
+    // Halt-wake signal. Mirrors (IE AND IF) != 0 — no IME gate, because
+    // HALTCNT halt wake is IME-don't-care per GBATEK.
+    void set_halt_wake_pending(bool pending) { halt_wake_pending_ = pending; }
+
     // Synthetic abort triggers. No real bus-fault source wires these yet —
     // later slices attach them to the MMU / cart protocol / etc. For now they
     // exist so unit tests can exercise the exception entry machinery.
@@ -52,6 +62,8 @@ private:
     Arm7State state_{};
     Arm7Bus* bus_ = nullptr;
     bool irq_line_ = false;
+    bool halted_ = false;
+    bool halt_wake_pending_ = false;
 };
 
 } // namespace ds

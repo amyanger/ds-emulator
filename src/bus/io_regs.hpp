@@ -13,4 +13,7 @@ constexpr u32 IO_IME = 0x04000208u;
 constexpr u32 IO_IE = 0x04000210u;
 constexpr u32 IO_IF = 0x04000214u;
 
+// ARM7 power-down control (NDS7 only — ARM9 halts via CP15).
+constexpr u32 IO_HALTCNT = 0x04000301u;
+
 } // namespace ds
