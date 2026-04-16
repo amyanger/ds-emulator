@@ -65,8 +65,26 @@ u32 dispatch_thumb_100_space(
 }
 
 u32 dispatch_thumb_101_space(
-    Arm7State&, Arm7Bus&, u16 instr, u32 instr_addr, u32 /*pc_read*/, u32 /*pc_literal*/) {
-    DS_LOG_WARN("arm7/thumb: 101_space stub instr=0x%04X at 0x%08X", instr, instr_addr);
+    Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal) {
+    // bits[15:13] == 101. Three sub-families share this space:
+    //   THUMB.12 ADD PC/SP:      1010 x ...      (top nibble 0xA)
+    //   THUMB.14 PUSH/POP:       1011 x10 R ...  — (instr & 0xF600) == 0xB400
+    //   THUMB.13 ADD SP signed:  1011 0000 ...   — the remaining 0xB000 region
+    //
+    // Check THUMB.14 first: PUSH/POP is emitted at every function
+    // prologue/epilogue and dominates runtime frequency in this bucket.
+    if ((instr & 0xF600u) == 0xB400u) {
+        const bool is_pop = ((instr >> 11) & 1u) != 0;
+        if (is_pop) {
+            return dispatch_thumb_pop(state, bus, instr, instr_addr, pc_read, pc_literal);
+        }
+        return dispatch_thumb_push(state, bus, instr, instr_addr, pc_read, pc_literal);
+    }
+    if ((instr >> 12) == 0xAu) {
+        DS_LOG_WARN("arm7/thumb: 101_space[T.12] stub instr=0x%04X at 0x%08X", instr, instr_addr);
+        return 1;
+    }
+    DS_LOG_WARN("arm7/thumb: 101_space[T.13] stub instr=0x%04X at 0x%08X", instr, instr_addr);
     return 1;
 }
 

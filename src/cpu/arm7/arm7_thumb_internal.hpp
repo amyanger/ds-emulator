@@ -68,6 +68,14 @@ u32 dispatch_thumb_ldst_halfword_imm(
 // Defined in arm7_thumb_ls.cpp.
 u32 dispatch_thumb_ldst_sp(
     Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
+
+// THUMB.14 PUSH/POP (± LR/PC). Delegate to execute_block_transfer.
+// Defined in arm7_thumb_block.cpp.
+u32 dispatch_thumb_push(
+    Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
+u32 dispatch_thumb_pop(
+    Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
+
 u32 dispatch_thumb_ldst_imm_wb(
     Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
 u32 dispatch_thumb_100_space(
