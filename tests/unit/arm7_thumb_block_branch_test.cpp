@@ -546,54 +546,51 @@ static void bcond_max_negative_offset() {
 }
 
 // cond=0xE is the "always" slot, reserved as UNDEF in the Bcond encoding.
-// Warn stub: PC advances by 2, CPSR and all registers unchanged.
-static void bcond_cond_e_undef_warn_stub() {
+// Slice 3d commit 5: routes through enter_exception(Undef, instr_addr + 2).
+// The faulting GPR value (r[0] here) is preserved; CPSR/mode/PC/R14 change.
+static void bcond_cond_e_enters_undef() {
     NDS nds;
     nds.arm7_bus().write16(BASE, thumb16(0xEu, 0x12u));
     setup_thumb(nds, BASE);
     nds.cpu7().state().r[0] = 0xA5A5'A5A5u;
     const u32 cpsr_before = nds.cpu7().state().cpsr;
-    step_one(nds);
-    REQUIRE(nds.cpu7().state().pc == BASE + 2u);
-    REQUIRE(nds.cpu7().state().cpsr == cpsr_before);
+    // Exception entry is 3 ARM7 cycles (coarse model).
+    const u64 before = nds.cpu7().state().cycles;
+    nds.cpu7().run_until((before + 3) * 2);
+    REQUIRE(nds.cpu7().state().current_mode() == Mode::Undefined);
+    REQUIRE(nds.cpu7().state().pc == 0x00000004u);
+    REQUIRE(nds.cpu7().state().r[14] == BASE + 2u);
+    REQUIRE(nds.cpu7().state().banks.spsr_und == cpsr_before);
+    REQUIRE((nds.cpu7().state().cpsr & (1u << 5)) == 0u); // T clear
+    REQUIRE((nds.cpu7().state().cpsr & (1u << 7)) != 0u); // I set
     REQUIRE(nds.cpu7().state().r[0] == 0xA5A5'A5A5u);
 }
 
 // ==== THUMB.17 SWI ====
 
-// Risk 5 guard: the warn stub MUST leave CPSR, R14_svc, SPSR_svc, mode,
-// and every banked register byte-identical to pre-SWI. Only PC advances.
-static void swi_is_warn_stub_preserves_state() {
+// Slice 3d commit 8: THUMB.17 enters Supervisor mode with return_addr =
+// instr_addr + 2, jumps to the SWI vector (0x08), masks IRQs, and clears
+// the T bit. Pre-entry CPSR is captured into SPSR_svc. Deep exception-
+// entry semantics (every CPSR bit, SWI number variations) live in
+// arm7_exception_swi_thumb_test.cpp; this case just confirms the dispatch
+// path in the Thumb decoder hands off correctly.
+static void swi_enters_supervisor() {
     NDS nds;
     nds.arm7_bus().write16(BASE, thumb17(0x12u));
     setup_thumb(nds, BASE);
 
     auto& s = nds.cpu7().state();
-    // Seed a recognisable pattern in svc banked storage and in current mode's
-    // visible regs. If SWI leaked any partial dispatch (mode switch, LR
-    // overwrite, SPSR save), one of these snapshots would diverge.
-    s.banks.svc_r13_r14[0] = 0x1111'2222u; // R13_svc
-    s.banks.svc_r13_r14[1] = 0x3333'4444u; // R14_svc
-    s.banks.spsr_svc = 0x5555'6666u;
-    s.r[13] = 0x0380'0500u;
-    s.r[14] = 0xAABB'CCDDu;
-
-    const Arm7Banks banks_before = s.banks;
     const u32 cpsr_before = s.cpsr;
-    const auto regs_before = s.r;
+    // Exception entry is 3 ARM7 cycles (coarse model in enter_exception()).
+    const u64 before = s.cycles;
+    nds.cpu7().run_until((before + 3) * 2);
 
-    step_one(nds);
-
-    REQUIRE(s.pc == BASE + 2u);
-    REQUIRE(s.cpsr == cpsr_before);
-    REQUIRE(s.banks.svc_r13_r14[0] == banks_before.svc_r13_r14[0]);
-    REQUIRE(s.banks.svc_r13_r14[1] == banks_before.svc_r13_r14[1]);
-    REQUIRE(s.banks.spsr_svc == banks_before.spsr_svc);
-    for (std::size_t i = 0; i < 16; ++i) {
-        if (i == 15)
-            continue; // R15 is pipeline-managed
-        REQUIRE(s.r[i] == regs_before[i]);
-    }
+    REQUIRE(s.current_mode() == Mode::Supervisor);
+    REQUIRE(s.pc == 0x00000008u);  // SWI vector
+    REQUIRE(s.r[14] == BASE + 2u); // Thumb return_addr = instr_addr + 2
+    REQUIRE(s.banks.spsr_svc == cpsr_before);
+    REQUIRE((s.cpsr & (1u << 5)) == 0u); // T clear
+    REQUIRE((s.cpsr & (1u << 7)) != 0u); // I set
 }
 
 // ==== THUMB.18 B unconditional ====
@@ -689,20 +686,24 @@ static void bl_second_halfword_alone_imm_zero() {
     REQUIRE(nds.cpu7().state().r[14] == ((A + 2u) | 1u));
 }
 
-// BLX suffix (ARMv5) — UNDEF on ARMv4. Warn stub: PC advances by 2,
-// LR/CPSR unchanged.
-static void bl_blx_suffix_undef_warn_stub() {
+// BLX suffix (ARMv5) — UNDEF on ARMv4.
+// Slice 3d commit 5: routes through enter_exception(Undef, instr_addr + 2).
+// UNDEF entry banks R14 into R14_und and writes return_addr = instr_addr + 2.
+static void bl_blx_suffix_enters_undef() {
     NDS nds;
     nds.arm7_bus().write16(BASE, thumb19_lo_blx(4));
     setup_thumb(nds, BASE);
-    const u32 lr_before = 0x1234'5678u;
-    nds.cpu7().state().r[14] = lr_before;
+    nds.cpu7().state().r[14] = 0x1234'5678u;
     const u32 cpsr_before = nds.cpu7().state().cpsr;
-
-    step_one(nds);
-    REQUIRE(nds.cpu7().state().pc == BASE + 2u);
-    REQUIRE(nds.cpu7().state().r[14] == lr_before);
-    REQUIRE(nds.cpu7().state().cpsr == cpsr_before);
+    // Exception entry is 3 ARM7 cycles (coarse model).
+    const u64 before = nds.cpu7().state().cycles;
+    nds.cpu7().run_until((before + 3) * 2);
+    REQUIRE(nds.cpu7().state().current_mode() == Mode::Undefined);
+    REQUIRE(nds.cpu7().state().pc == 0x00000004u);
+    REQUIRE(nds.cpu7().state().r[14] == BASE + 2u);
+    REQUIRE(nds.cpu7().state().banks.spsr_und == cpsr_before);
+    REQUIRE((nds.cpu7().state().cpsr & (1u << 5)) == 0u); // T clear
+    REQUIRE((nds.cpu7().state().cpsr & (1u << 7)) != 0u); // I set
 }
 
 int main() {
@@ -730,8 +731,8 @@ int main() {
     bcond_backward_negative_offset();
     bcond_max_positive_offset();
     bcond_max_negative_offset();
-    bcond_cond_e_undef_warn_stub();
-    swi_is_warn_stub_preserves_state();
+    bcond_cond_e_enters_undef();
+    swi_enters_supervisor();
     b_uncond_forward();
     b_uncond_backward();
     b_uncond_max_positive();
@@ -739,6 +740,6 @@ int main() {
     bl_both_halves_target_and_return();
     bl_second_halfword_alone_uses_prestaged_lr();
     bl_second_halfword_alone_imm_zero();
-    bl_blx_suffix_undef_warn_stub();
+    bl_blx_suffix_enters_undef();
     return 0;
 }

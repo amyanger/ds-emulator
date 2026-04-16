@@ -11,12 +11,37 @@
 #include "cpu/arm7/arm7.hpp"
 #include "cpu/arm7/arm7_alu.hpp"
 #include "cpu/arm7/arm7_decode_internal.hpp"
+#include "cpu/arm7/arm7_exception.hpp"
+#include "cpu/arm7/bios/bios7_hle.hpp"
 
 #include <cassert>
 
 namespace ds {
 
 namespace {
+
+// Route bits[27:25] = 0b110/0b111 — either a coprocessor access (CDP/MRC/MCR/
+// LDC/STC) or a SWI. ARMv4T ARM7TDMI has no coprocessor interface, so any
+// coproc encoding is legitimately undefined and must trap to the UND vector.
+// SWI (bits[27:24] == 0b1111) enters Supervisor mode with return_addr =
+// instr_addr + 4, then hands off to the BIOS-HLE dispatcher.
+u32 dispatch_coproc_or_swi(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
+    const u32 bits_27_24 = (instr >> 24) & 0xFu;
+    if (bits_27_24 == 0xFu) {
+        // ARM-state SWI: bits[23:0] = comment field / SWI number. Entry is a
+        // fixed 3 cycles (matches enter_exception's coarse model); the HLE
+        // stub returns 0 today, so we hard-code 3 rather than summing the
+        // two return values to keep the cost contract explicit.
+        const u32 swi_number = instr & 0x00FFFFFFu;
+        enter_exception(state, ExceptionKind::Swi, instr_addr + 4);
+        arm7_bios_hle_dispatch_swi(state, bus, swi_number);
+        return 3;
+    }
+    // Coprocessor instructions (CDP / MRC / MCR / LDC / STC): enter UND mode
+    // with return address = instr_addr + 4, so `MOVS PC, R14` in the handler
+    // resumes at the instruction FOLLOWING the faulting one.
+    return enter_exception(state, ExceptionKind::Undef, instr_addr + 4);
+}
 
 u32 dispatch_arm(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
     const u32 cond = instr >> 28;
@@ -39,9 +64,7 @@ u32 dispatch_arm(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
         return dispatch_branch(state, instr);
     case 0b110:
     case 0b111:
-        // Coproc / SWI — deferred to slice 3d.
-        DS_LOG_WARN("arm7: coproc/SWI form 0x%08X at 0x%08X", instr, instr_addr);
-        return 1;
+        return dispatch_coproc_or_swi(state, bus, instr, instr_addr);
     default:
         return 1; // unreachable
     }

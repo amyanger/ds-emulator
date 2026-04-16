@@ -42,10 +42,11 @@ static void thumb_dispatch_covers_all_eight_buckets() {
     //   buckets 0..5: the bare bucket selector is a harmless shift/add/dp
     //                 or load-store encoding that advances PC by 2.
     //   bucket 6 (0xC000): THUMB.15 STMIA r0, {} — empty list no-op.
-    //   bucket 7 (0xE800): THUMB.19 second halfword with form bits 01 —
-    //                      BLX suffix, ARMv5-only, warn stub that does
-    //                      not touch PC or LR. (0xE000 would be THUMB.18
-    //                      B #0 which self-loops, hence the 0xE800 choice.)
+    //   bucket 7 (0xF000): THUMB.19 first halfword — BL prefix with imm11=0.
+    //                      Sets LR but does not touch PC. (0xE000 would be
+    //                      THUMB.18 B #0 which self-loops; 0xE800 was the
+    //                      old BLX-suffix warn stub but now UNDEFs per
+    //                      slice 3d commit 5.)
     const u16 bucket_encoding[8] = {
         0x0000u, // 000
         0x2000u, // 001
@@ -54,7 +55,7 @@ static void thumb_dispatch_covers_all_eight_buckets() {
         0x8000u, // 100
         0xA000u, // 101
         0xC000u, // 110 — STMIA r0, {} empty list
-        0xE800u, // 111 — BLX suffix warn stub (no branch)
+        0xF000u, // 111 — BL prefix imm11=0 (sets LR, no branch)
     };
     for (u32 bucket = 0; bucket < 8; ++bucket) {
         nds.arm7_bus().write16(base + bucket * 2, bucket_encoding[bucket]);

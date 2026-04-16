@@ -1,8 +1,9 @@
 // arm7_thumb_branch.cpp — Thumb conditional/unconditional branch and BL
-// (two-halfword) formats. Slice 3c capstone (commit 18):
+// (two-halfword) formats. Slice 3c capstone (commit 18); SWI entry wired
+// in slice 3d commit 8:
 //
 //   THUMB.16: 1101 cond4 imm8             — Bcond (cond 0xE UNDEF, 0xF → SWI)
-//   THUMB.17: 11011111  imm8              — SWI (slice 3c warn stub only)
+//   THUMB.17: 11011111  imm8              — SWI (enter_exception + HLE dispatch)
 //   THUMB.18: 11100 imm11                 — B unconditional
 //   THUMB.19: 11110 imm11_hi              — BL first halfword (sets LR)
 //             11111 imm11_lo              — BL second halfword (branches via LR)
@@ -17,14 +18,16 @@
 
 #include "bus/arm7_bus.hpp"
 #include "cpu/arm7/arm7_alu.hpp"
+#include "cpu/arm7/arm7_exception.hpp"
 #include "cpu/arm7/arm7_state.hpp"
 #include "cpu/arm7/arm7_thumb_internal.hpp"
+#include "cpu/arm7/bios/bios7_hle.hpp"
 #include "ds/common.hpp"
 
 namespace ds {
 
 u32 dispatch_thumb_bcond_swi(Arm7State& state,
-                             Arm7Bus& /*bus*/,
+                             Arm7Bus& bus,
                              u16 instr,
                              u32 instr_addr,
                              u32 /*pc_read*/,
@@ -33,16 +36,20 @@ u32 dispatch_thumb_bcond_swi(Arm7State& state,
     const u32 imm8 = instr & 0xFFu;
 
     if (cond == 0xFu) {
-        // THUMB.17 SWI — slice 3c warn stub. Mode switch / SPSR save / vector
-        // jump land in slice 3d. CPSR, R14_svc, SPSR_svc, and PC must all
-        // remain unchanged modulo the PC += 2 step_thumb already performed.
-        DS_LOG_WARN("arm7/thumb17: SWI imm=0x%02X (slice 3c stub) at 0x%08X", imm8, instr_addr);
-        return 1;
+        // THUMB.17 SWI — enter Supervisor mode with return_addr = instr_addr + 2
+        // (post-faulting-instruction address for a 16-bit Thumb SWI, per
+        // GBATEK and spec §5.3), then hand off to the BIOS-HLE dispatcher.
+        // The HLE layer is a warn-only stub in slice 3d; real bodies land
+        // in a later slice. SWI number is imm8.
+        enter_exception(state, ExceptionKind::Swi, instr_addr + 2);
+        arm7_bios_hle_dispatch_swi(state, bus, imm8);
+        return 3;
     }
     if (cond == 0xEu) {
         // cond 0xE in THUMB.16 is UNDEF (the "always" code is reserved here).
-        DS_LOG_WARN("arm7/thumb16: cond=0xE UNDEF at 0x%08X", instr_addr);
-        return 1;
+        // step_thumb has already pre-advanced state.pc = instr_addr + 2, which
+        // is the correct R14_und return address for a 16-bit faulting insn.
+        return enter_exception(state, ExceptionKind::Undef, instr_addr + 2);
     }
 
     if (!eval_condition(cond, state.cpsr)) {
@@ -97,10 +104,9 @@ u32 dispatch_thumb_bl_suffix(Arm7State& state,
     const u32 form = (instr >> 11) & 0x3u;
     if (form == 0b01u) {
         // 11101 imm11_lo — BLX label, ARMv5 only. UNDEF on ARMv4.
-        DS_LOG_WARN(
-            "arm7/thumb19: BLX (second halfword 11101) is ARMv5 only, UNDEF on ARMv4 at 0x%08X",
-            instr_addr);
-        return 1;
+        // Return address is the second halfword's instr_addr + 2 (step_thumb
+        // pre-advanced state.pc to exactly that).
+        return enter_exception(state, ExceptionKind::Undef, instr_addr + 2);
     }
 
     // 11111 imm11_lo — BL second halfword.
