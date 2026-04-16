@@ -17,8 +17,7 @@ u32 execute_dp_op(Arm7State& state,
                   u32 operand2,
                   bool shifter_carry,
                   bool s_flag,
-                  u32 rd,
-                  u32 instr_addr) {
+                  u32 rd) {
     u32 result = 0;
     bool logical_form = true;
     bool writeback = true;
@@ -107,7 +106,25 @@ u32 execute_dp_op(Arm7State& state,
 
     if (s_flag) {
         if (rd == 15 && writeback) {
-            DS_LOG_WARN("arm7: S-flag set with Rd=R15 at 0x%08X", instr_addr);
+            // ARMv4 exception-return: SPSR of current mode copies into CPSR.
+            // Mode bits change, so R13/R14 must re-bank BEFORE we finalize CPSR.
+            // MOVS PC, R14 returns from SWI/UNDEF; SUBS PC, R14, #4 returns from
+            // IRQ/FIQ/PrefetchAbort. User / System have no SPSR — behavior is
+            // UNPREDICTABLE per ARMv4; we leave CPSR untouched (matches melonDS).
+            //
+            // PC alignment depends on the *new* T bit (from SPSR), so we
+            // re-align state.pc here after the CPSR copy. In the User/System
+            // fallback we keep write_rd's ARM-aligned value, which is correct
+            // because no mode change happens and we remain in ARM state.
+            u32* spsr = state.spsr_slot();
+            if (spsr != nullptr) {
+                const u32 new_cpsr = *spsr;
+                const Mode new_mode = static_cast<Mode>(new_cpsr & 0x1Fu);
+                state.switch_mode(new_mode);
+                state.cpsr = new_cpsr;
+                const bool thumb = (new_cpsr & (1u << 5)) != 0;
+                state.pc = thumb ? (result & ~0x1u) : (result & ~0x3u);
+            }
         } else {
             state.cpsr = set_nz(state.cpsr, result);
             if (logical_form) {
@@ -173,7 +190,7 @@ u32 dispatch_dp(Arm7State& state, u32 instr, u32 instr_addr) {
     const u32 rn_val = reg_shift ? read_rm_pc12(state, rn) : state.r[rn];
 
     return execute_dp_op(
-        state, static_cast<DpOp>(opcode), rn_val, op2.value, op2.carry, s_flag, rd, instr_addr);
+        state, static_cast<DpOp>(opcode), rn_val, op2.value, op2.carry, s_flag, rd);
 }
 
 } // namespace ds

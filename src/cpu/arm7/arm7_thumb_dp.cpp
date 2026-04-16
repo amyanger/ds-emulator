@@ -22,7 +22,7 @@ namespace ds {
 u32 dispatch_thumb_shift_or_addsub(Arm7State& state,
                                    Arm7Bus& /*bus*/,
                                    u16 instr,
-                                   u32 instr_addr,
+                                   u32 /*instr_addr*/,
                                    u32 /*pc_read*/,
                                    u32 /*pc_literal*/) {
     const u32 op = (instr >> 11) & 0x3u;
@@ -40,14 +40,8 @@ u32 dispatch_thumb_shift_or_addsub(Arm7State& state,
         const u32 operand2 = i_bit ? rn_or_imm : state.r[rn_or_imm];
         const bool current_c = (state.cpsr & (1u << 29)) != 0;
 
-        return execute_dp_op(state,
-                             sub ? DpOp::SUB : DpOp::ADD,
-                             state.r[rs],
-                             operand2,
-                             current_c,
-                             true,
-                             rd,
-                             instr_addr);
+        return execute_dp_op(
+            state, sub ? DpOp::SUB : DpOp::ADD, state.r[rs], operand2, current_c, true, rd);
     }
 
     // THUMB.1: 000 op2 off5 Rs3 Rd3
@@ -61,7 +55,7 @@ u32 dispatch_thumb_shift_or_addsub(Arm7State& state,
 
     // Rd = shifted result, flags NZC (V unchanged).
     // execute_dp_op(MOV) with s_flag=true sets NZ + shifter_carry. V untouched.
-    return execute_dp_op(state, DpOp::MOV, 0, sr.value, sr.carry, true, rd, instr_addr);
+    return execute_dp_op(state, DpOp::MOV, 0, sr.value, sr.carry, true, rd);
 }
 
 // ---- THUMB.3 (bits[15:13] == 001) ----
@@ -69,7 +63,7 @@ u32 dispatch_thumb_shift_or_addsub(Arm7State& state,
 u32 dispatch_thumb_imm_dp(Arm7State& state,
                           Arm7Bus& /*bus*/,
                           u16 instr,
-                          u32 instr_addr,
+                          u32 /*instr_addr*/,
                           u32 /*pc_read*/,
                           u32 /*pc_literal*/) {
     const u32 op = (instr >> 11) & 0x3u;
@@ -81,7 +75,7 @@ u32 dispatch_thumb_imm_dp(Arm7State& state,
     const u32 rn_value = state.r[rd];
     const bool current_c = (state.cpsr & (1u << 29)) != 0;
 
-    return execute_dp_op(state, op_table[op], rn_value, imm8, current_c, true, rd, instr_addr);
+    return execute_dp_op(state, op_table[op], rn_value, imm8, current_c, true, rd);
 }
 
 // ---- THUMB.4 (bits[15:10] == 010000) ----
@@ -90,7 +84,7 @@ u32 dispatch_thumb_imm_dp(Arm7State& state,
 u32 dispatch_thumb_alu(Arm7State& state,
                        Arm7Bus& /*bus*/,
                        u16 instr,
-                       u32 instr_addr,
+                       u32 /*instr_addr*/,
                        u32 /*pc_read*/,
                        u32 /*pc_literal*/) {
     const u32 op = (instr >> 6) & 0xFu;
@@ -107,14 +101,14 @@ u32 dispatch_thumb_alu(Arm7State& state,
         const u32 amount = rs_value & 0xFFu;
         auto sr = barrel_shift_reg(rd_value, st, amount);
         const bool carry = (amount == 0) ? current_c : sr.carry;
-        return execute_dp_op(state, DpOp::MOV, 0, sr.value, carry, true, rd, instr_addr);
+        return execute_dp_op(state, DpOp::MOV, 0, sr.value, carry, true, rd);
     };
 
     switch (op) {
     case 0x0: // AND — NZ only
-        return execute_dp_op(state, DpOp::AND, rd_value, rs_value, current_c, true, rd, instr_addr);
+        return execute_dp_op(state, DpOp::AND, rd_value, rs_value, current_c, true, rd);
     case 0x1: // EOR — NZ only
-        return execute_dp_op(state, DpOp::EOR, rd_value, rs_value, current_c, true, rd, instr_addr);
+        return execute_dp_op(state, DpOp::EOR, rd_value, rs_value, current_c, true, rd);
     case 0x2: // LSL reg — NZC (C unchanged if amount==0)
         return do_shift(ShiftType::Lsl);
     case 0x3: // LSR reg
@@ -122,21 +116,21 @@ u32 dispatch_thumb_alu(Arm7State& state,
     case 0x4: // ASR reg
         return do_shift(ShiftType::Asr);
     case 0x5: // ADC — NZCV
-        return execute_dp_op(state, DpOp::ADC, rd_value, rs_value, current_c, true, rd, instr_addr);
+        return execute_dp_op(state, DpOp::ADC, rd_value, rs_value, current_c, true, rd);
     case 0x6: // SBC — NZCV
-        return execute_dp_op(state, DpOp::SBC, rd_value, rs_value, current_c, true, rd, instr_addr);
+        return execute_dp_op(state, DpOp::SBC, rd_value, rs_value, current_c, true, rd);
     case 0x7: // ROR reg — NZC
         return do_shift(ShiftType::Ror);
     case 0x8: // TST — NZ only, no writeback
-        return execute_dp_op(state, DpOp::TST, rd_value, rs_value, current_c, true, rd, instr_addr);
+        return execute_dp_op(state, DpOp::TST, rd_value, rs_value, current_c, true, rd);
     case 0x9: // NEG = RSB Rd, Rs, #0 — NZCV
-        return execute_dp_op(state, DpOp::RSB, rs_value, 0, current_c, true, rd, instr_addr);
+        return execute_dp_op(state, DpOp::RSB, rs_value, 0, current_c, true, rd);
     case 0xA: // CMP — NZCV, no writeback
-        return execute_dp_op(state, DpOp::CMP, rd_value, rs_value, current_c, true, rd, instr_addr);
+        return execute_dp_op(state, DpOp::CMP, rd_value, rs_value, current_c, true, rd);
     case 0xB: // CMN — NZCV, no writeback
-        return execute_dp_op(state, DpOp::CMN, rd_value, rs_value, current_c, true, rd, instr_addr);
+        return execute_dp_op(state, DpOp::CMN, rd_value, rs_value, current_c, true, rd);
     case 0xC: // ORR — NZ only
-        return execute_dp_op(state, DpOp::ORR, rd_value, rs_value, current_c, true, rd, instr_addr);
+        return execute_dp_op(state, DpOp::ORR, rd_value, rs_value, current_c, true, rd);
     case 0xD: { // MUL — ARMv4: NZ set, C destroyed, V unchanged
         const u32 result = rd_value * rs_value;
         write_rd(state, rd, result);
@@ -148,9 +142,9 @@ u32 dispatch_thumb_alu(Arm7State& state,
         return 1;
     }
     case 0xE: // BIC — NZ only
-        return execute_dp_op(state, DpOp::BIC, rd_value, rs_value, current_c, true, rd, instr_addr);
+        return execute_dp_op(state, DpOp::BIC, rd_value, rs_value, current_c, true, rd);
     case 0xF: // MVN — NZ only
-        return execute_dp_op(state, DpOp::MVN, rd_value, rs_value, current_c, true, rd, instr_addr);
+        return execute_dp_op(state, DpOp::MVN, rd_value, rs_value, current_c, true, rd);
     default:
         return 1; // unreachable — op is 4 bits
     }
@@ -191,7 +185,7 @@ u32 dispatch_thumb_hireg_bx(
                         instr_addr);
         }
         const bool current_c = (state.cpsr & (1u << 29)) != 0;
-        execute_dp_op(state, DpOp::CMP, rd_value, rs_value, current_c, true, rd_full, instr_addr);
+        execute_dp_op(state, DpOp::CMP, rd_value, rs_value, current_c, true, rd_full);
         return 1;
     }
     case 2: { // MOV — no flag update
