@@ -34,6 +34,9 @@ public:
     // subsystem's state. Use raise()/reg-writes via NDS glue instead.
     Arm7IrqController& irq7() { return irq7_ctrl_; }
 
+    // Test/debug accessor for the SOUNDBIAS register. NOT for cross-subsystem use.
+    u16 soundbias() const { return soundbias_; }
+
     // ARM9 I/O dispatch. Only arm9_io_write8 handles a real register in
     // this slice — WRAMCNT at 0x0400'0247. All other I/O reads return 0
     // and writes are ignored until later slices wire more registers.
@@ -83,6 +86,7 @@ private:
     Arm9Bus arm9_bus_;
     Arm7Bus arm7_bus_;
     Arm7IrqController irq7_ctrl_{};
+    u16 soundbias_ = 0x0200u;
 };
 
 } // namespace ds

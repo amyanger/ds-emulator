@@ -16,4 +16,7 @@ constexpr u32 IO_IF = 0x04000214u;
 // ARM7 power-down control (NDS7 only — ARM9 halts via CP15).
 constexpr u32 IO_HALTCNT = 0x04000301u;
 
+// ARM7 sound bias (NDS7 only — ARM9 has no mapping, reads are open-bus).
+constexpr u32 IO_SOUNDBIAS = 0x04000504u;
+
 } // namespace ds

@@ -32,6 +32,7 @@ void NDS::reset() {
     wram_ctl_.reset();
     arm9_bus_.reset();
     arm7_bus_.reset();
+    soundbias_ = 0x0200u;
     irq7_ctrl_.reset();
     // After reset IME/IE/IF are all zero so the line is false. Push it into
     // cpu7_ explicitly so state is consistent even if Arm7::reset() is ever
@@ -160,6 +161,9 @@ void NDS::arm7_io_write32(u32 addr, u32 value) {
         irq7_ctrl_.write_if(value);
         update_arm7_irq_signals();
         break;
+    case IO_SOUNDBIAS:
+        soundbias_ = static_cast<u16>(value & 0x3FFu);
+        break;
     default:
         break;
     }
@@ -198,6 +202,10 @@ void NDS::arm7_io_write16(u32 addr, u16 value) {
     if (addr == IO_IF + 2u) {
         irq7_ctrl_.write_if(static_cast<u32>(value) << 16);
         update_arm7_irq_signals();
+        return;
+    }
+    if (addr == IO_SOUNDBIAS) {
+        soundbias_ = static_cast<u16>(value & 0x3FFu);
         return;
     }
 }
