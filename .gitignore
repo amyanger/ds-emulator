@@ -37,3 +37,6 @@ stderr.log
 # Local-only working docs — never commit, never share
 CLAUDE.md
 docs/plans/
+
+# CTest output when run from project root
+Testing/
