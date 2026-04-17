@@ -20,6 +20,12 @@ u32 arm7_bios_hle_dispatch_swi(Arm7State& state, Arm7Bus& bus, u32 swi_number) {
     case 0x03:
         cycles = bios7_wait_by_loop(state, bus);
         break;
+    case 0x04:
+        cycles = bios7_intr_wait(state, bus);
+        break;
+    case 0x05:
+        cycles = bios7_vblank_intr_wait(state, bus);
+        break;
     case 0x06:
         cycles = bios7_halt(state, bus);
         break;
