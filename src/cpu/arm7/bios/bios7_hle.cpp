@@ -2,15 +2,14 @@
 
 #include "bus/arm7_bus.hpp"
 #include "cpu/arm7/arm7_state.hpp"
+#include "cpu/arm7/bios/bios7_halt.hpp"
+#include "cpu/arm7/bios/bios7_math.hpp"
+#include "cpu/arm7/bios/bios7_tables.hpp"
 
 namespace ds {
 
-u32 arm7_bios_hle_dispatch_swi(Arm7State& state, Arm7Bus& /*bus*/, u32 swi_number) {
-    // Flat switch on the low 8 bits — every DS SWI uses only the bottom
-    // byte of the comment field. Commits 5–11 convert the warn-stub cases
-    // below into real implementations by adding `case 0xNN: cycles = ...`
-    // arms BEFORE the default. Stubs all charge 1 cycle for the body; real
-    // per-SWI costs arrive with their implementations.
+u32 arm7_bios_hle_dispatch_swi(Arm7State& state, Arm7Bus& bus, u32 swi_number) {
+    // DS SWIs use only the low 8 bits of the comment field.
     u32 cycles = 1;
     switch (swi_number & 0xFFu) {
     case 0x00:
@@ -18,19 +17,29 @@ u32 arm7_bios_hle_dispatch_swi(Arm7State& state, Arm7Bus& /*bus*/, u32 swi_numbe
         DS_LOG_WARN(
             "arm7/bios: SoftReset (SWI 0x00) not implemented — direct-boot should never call this");
         break;
+    case 0x03:
+        cycles = bios7_wait_by_loop(state, bus);
+        break;
+    case 0x0D:
+        cycles = bios7_sqrt(state, bus);
+        break;
+    case 0x0F:
+        cycles = bios7_is_debugger(state, bus);
+        break;
     case 0x10:
     case 0x11:
     case 0x12:
     case 0x13:
     case 0x14:
     case 0x15:
-        // Decompressor family — full implementations land in slice 3f.
         DS_LOG_WARN("arm7/bios: decompressor SWI 0x%02X not implemented (slice 3f)",
                     swi_number & 0xFFu);
         break;
+    case 0x1D:
+        cycles = bios7_get_boot_procs(state, bus);
+        break;
     default:
-        // Includes genuinely invalid SWIs (0x01, 0x02, 0x0A, 0x16–0x19, 0x1E)
-        // and anything not yet implemented in later commits.
+        // Invalid SWIs per GBATEK: 0x01, 0x02, 0x0A, 0x16–0x19, 0x1E.
         DS_LOG_WARN("arm7/bios: SWI 0x%02X not implemented / invalid (NOP-return)",
                     swi_number & 0xFFu);
         break;

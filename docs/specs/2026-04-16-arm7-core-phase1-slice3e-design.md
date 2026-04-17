@@ -98,7 +98,7 @@ Two SWIs (`IntrWait` / `VBlankIntrWait`) need a shadow register at `[0x0380FFF8]
 | 0x1A | GetSineTable | tables | **YES** | 64-entry constant, bounds-checked. |
 | 0x1B | GetPitchTable | tables | **YES** | 768-entry constant. |
 | 0x1C | GetVolumeTable | tables | **YES** | 724-entry constant. |
-| 0x1D | GetBootProcs | misc | **YES** | Stub: write zeros to out-pointers. |
+| 0x1D | GetBootProcs | misc | **YES** | R2 input; zero R0/R1/R3 outputs. |
 | 0x1E | (invalid) | — | warn-stub | |
 | 0x1F | CustomHalt | halt | **YES** | HALTCNT = R2. |
 
@@ -776,14 +776,15 @@ Tables live in `bios7_tables.cpp` as `static constexpr std::array` (sine) / `sta
 
 ### 5.12 `GetBootProcs` (SWI 0x1D)
 
-**Inputs:** R0, R1, R2 = out-pointers for three function-pointer values BIOS would normally write.
-**Behavior:** real BIOS writes boot-function addresses; post-direct-boot, HG/SS doesn't consume them. Stub: write zeros.
+**Inputs:** R2 is an input (GBATEK: "…one of the zero values is XORed by **incoming r2**").
+**Outputs:** R0, R1, R3 receive the three boot-proc values (DeSmuME returns constants 0x00000A2E / 0x00002C3C / 0x000005FF).
+**Behavior:** post-direct-boot, HG/SS doesn't consume the values; zeros suffice. Writing through out-pointers (as the original spec text did) is unsafe because a guest caller may supply non-pointer values in R0/R1/R2 and the bus writes would corrupt arbitrary memory.
 
 ```cpp
-u32 bios7_get_boot_procs(Arm7State& s, Arm7Bus& b) {
-    b.write32(s.r[0], 0);
-    b.write32(s.r[1], 0);
-    b.write32(s.r[2], 0);
+u32 bios7_get_boot_procs(Arm7State& s, Arm7Bus&) {
+    s.r[0] = 0;
+    s.r[1] = 0;
+    s.r[3] = 0;
     return 1;
 }
 ```
@@ -869,7 +870,7 @@ Seven new test binaries. Trivial SWIs share a binary; non-trivial SWIs get their
 - **IsDebugger:** R0 = 0.
 - **SoundBias R0=0:** SOUNDBIAS stored as 0x000.
 - **SoundBias R0=1:** SOUNDBIAS stored as 0x200.
-- **GetBootProcs:** three output pointers each receive 0.
+- **GetBootProcs:** R0 = R1 = R3 = 0; R2 preserved.
 
 ### 6.6 `arm7_bios_dispatch_test.cpp`
 
@@ -1104,7 +1105,7 @@ SWI   Name                  Family    R0 in       R1 in       R2 in       Output
 0x1A  GetSineTable          tables    index       —           —           R0=sine[i]
 0x1B  GetPitchTable         tables    index       —           —           R0=pitch[i]
 0x1C  GetVolumeTable        tables    index       —           —           R0=volume[i]
-0x1D  GetBootProcs          misc      out0        out1        out2        (zeros written)
+0x1D  GetBootProcs          misc      —           —           xor_in      R0=R1=R3=0
 0x1F  CustomHalt            halt      —           —           halt_val    (HALTCNT=R2)
 
 Prerequisite hardware:

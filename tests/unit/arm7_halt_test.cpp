@@ -21,6 +21,7 @@
 #include "bus/io_regs.hpp"
 #include "cpu/arm7/arm7.hpp"
 #include "cpu/arm7/arm7_state.hpp"
+#include "cpu/arm7/bios/bios7_halt.hpp"
 #include "nds.hpp"
 #include "require.hpp"
 
@@ -200,12 +201,54 @@ static void haltcnt_mode_decode_truth_table() {
     REQUIRE(halted_after_haltcnt_write(0xC0u) == true);  // mode 3: Sleep → halt
 }
 
+static void wait_by_loop_adds_four_cycles_per_count() {
+    NDS nds;
+    auto& state = nds.cpu7().state();
+    state.r[0] = 100;
+    const u64 before = state.cycles;
+    bios7_wait_by_loop(state, nds.arm7_bus());
+    REQUIRE(state.cycles == before + 400ull);
+}
+
+static void wait_by_loop_zero_count_is_noop() {
+    NDS nds;
+    auto& state = nds.cpu7().state();
+    state.r[0] = 0;
+    const u64 before = state.cycles;
+    bios7_wait_by_loop(state, nds.arm7_bus());
+    REQUIRE(state.cycles == before);
+}
+
+// 4 * 0x40000000 = 0x100000000 — must fit in u64 without silent 32-bit
+// truncation of the intermediate multiplication.
+static void wait_by_loop_max_count_no_overflow() {
+    NDS nds;
+    auto& state = nds.cpu7().state();
+    state.r[0] = 0x40000000u;
+    const u64 before = state.cycles;
+    bios7_wait_by_loop(state, nds.arm7_bus());
+    REQUIRE(state.cycles == before + static_cast<u64>(0x100000000ull));
+}
+
+// Hardware's `SUB R0,1 / BGT LOP` exits with R0 == 0.
+static void wait_by_loop_clobbers_r0_to_zero() {
+    NDS nds;
+    auto& state = nds.cpu7().state();
+    state.r[0] = 100;
+    bios7_wait_by_loop(state, nds.arm7_bus());
+    REQUIRE(state.r[0] == 0u);
+}
+
 int main() {
     haltcnt_mode2_sets_halted();
     halted_cpu_burns_cycles_without_stepping();
     wake_with_irq_masked_resumes_stepping();
     wake_with_irq_unmasked_enters_vector();
     haltcnt_mode_decode_truth_table();
-    std::puts("arm7_halt_test: all 5 cases passed");
+    wait_by_loop_adds_four_cycles_per_count();
+    wait_by_loop_zero_count_is_noop();
+    wait_by_loop_max_count_no_overflow();
+    wait_by_loop_clobbers_r0_to_zero();
+    std::puts("arm7_halt_test: all 9 cases passed");
     return 0;
 }
