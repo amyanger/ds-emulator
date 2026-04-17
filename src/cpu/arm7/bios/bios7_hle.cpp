@@ -32,6 +32,9 @@ u32 arm7_bios_hle_dispatch_swi(Arm7State& state, Arm7Bus& bus, u32 swi_number) {
     case 0x07:
         cycles = bios7_sleep(state, bus);
         break;
+    case 0x09:
+        cycles = bios7_div(state, bus);
+        break;
     case 0x0D:
         cycles = bios7_sqrt(state, bus);
         break;
