@@ -4,6 +4,7 @@
 #include "cpu/arm7/arm7_state.hpp"
 #include "cpu/arm7/bios/bios7_halt.hpp"
 #include "cpu/arm7/bios/bios7_math.hpp"
+#include "cpu/arm7/bios/bios7_memcpy.hpp"
 #include "cpu/arm7/bios/bios7_tables.hpp"
 
 namespace ds {
@@ -35,8 +36,17 @@ u32 arm7_bios_hle_dispatch_swi(Arm7State& state, Arm7Bus& bus, u32 swi_number) {
     case 0x09:
         cycles = bios7_div(state, bus);
         break;
+    case 0x0B:
+        cycles = bios7_cpu_set(state, bus);
+        break;
+    case 0x0C:
+        cycles = bios7_cpu_fast_set(state, bus);
+        break;
     case 0x0D:
         cycles = bios7_sqrt(state, bus);
+        break;
+    case 0x0E:
+        cycles = bios7_get_crc16(state, bus);
         break;
     case 0x0F:
         cycles = bios7_is_debugger(state, bus);

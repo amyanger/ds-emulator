@@ -21,6 +21,7 @@ add_library(ds_core STATIC
     cpu/arm7/bios/bios7_hle.cpp
     cpu/arm7/bios/bios7_halt.cpp
     cpu/arm7/bios/bios7_math.cpp
+    cpu/arm7/bios/bios7_memcpy.cpp
     cpu/arm7/bios/bios7_tables.cpp
     cpu/arm7/arm7_thumb_decode.cpp
     cpu/arm7/arm7_thumb_dp.cpp
