@@ -20,6 +20,12 @@ u32 arm7_bios_hle_dispatch_swi(Arm7State& state, Arm7Bus& bus, u32 swi_number) {
     case 0x03:
         cycles = bios7_wait_by_loop(state, bus);
         break;
+    case 0x06:
+        cycles = bios7_halt(state, bus);
+        break;
+    case 0x07:
+        cycles = bios7_sleep(state, bus);
+        break;
     case 0x0D:
         cycles = bios7_sqrt(state, bus);
         break;
@@ -37,6 +43,9 @@ u32 arm7_bios_hle_dispatch_swi(Arm7State& state, Arm7Bus& bus, u32 swi_number) {
         break;
     case 0x1D:
         cycles = bios7_get_boot_procs(state, bus);
+        break;
+    case 0x1F:
+        cycles = bios7_custom_halt(state, bus);
         break;
     default:
         // Invalid SWIs per GBATEK: 0x01, 0x02, 0x0A, 0x16–0x19, 0x1E.

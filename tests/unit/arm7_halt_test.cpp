@@ -175,15 +175,24 @@ static void wake_with_irq_unmasked_enters_vector() {
     REQUIRE(state.pc == 0x18u);               // IRQ vector target after arm7_enter_irq
 }
 
-// Helper for TEST 5: apply a HALTCNT byte write to a fresh NDS and return
-// the halted state. Kept out-of-line so each invocation gets its own stack
-// frame — holding four ~4 MB NDS objects in the same function (even in
-// disjoint scopes) blows the 8 MB default macOS main-thread stack under
-// ASan's red-zone padding, because the compiler reserves frame space for
-// all scopes up-front in the function prologue.
+// Helpers for truth-table tests: apply either a raw HALTCNT write or the
+// CustomHalt SWI to a fresh NDS and return the halted state. Kept out-of-
+// line so each invocation gets its own stack frame — holding four ~4 MB
+// NDS objects in the same function (even in disjoint scopes) blows the
+// 8 MB default macOS main-thread stack under ASan's red-zone padding,
+// because the compiler reserves frame space for all scopes up-front in
+// the function prologue.
 static bool halted_after_haltcnt_write(u8 value) {
     NDS nds;
     nds.arm7_bus().write8(IO_HALTCNT, value);
+    return nds.cpu7().is_halted();
+}
+
+static bool halted_after_custom_halt(u32 r2) {
+    NDS nds;
+    auto& state = nds.cpu7().state();
+    state.r[2] = r2;
+    bios7_custom_halt(state, nds.arm7_bus());
     return nds.cpu7().is_halted();
 }
 
@@ -239,6 +248,45 @@ static void wait_by_loop_clobbers_r0_to_zero() {
     REQUIRE(state.r[0] == 0u);
 }
 
+// SWI 0x06 — Halt. GBATEK: writes HALTCNT = 0x80. The HALTCNT handler
+// flips halted_ = true; the SWI itself has no input/output registers.
+static void bios_halt_writes_haltcnt_mode2() {
+    NDS nds;
+    auto& state = nds.cpu7().state();
+    REQUIRE(nds.cpu7().is_halted() == false);
+
+    bios7_halt(state, nds.arm7_bus());
+
+    REQUIRE(nds.cpu7().is_halted() == true);
+}
+
+// SWI 0x07 — Sleep. GBATEK is vague; by analogy with CustomHalt 0xC0, we
+// write 0xC0 to HALTCNT. Slice 3e §3 treats Sleep as Halt — both flip
+// halted_ via HALTCNT's mode-decode path.
+static void bios_sleep_writes_haltcnt_mode3() {
+    NDS nds;
+    auto& state = nds.cpu7().state();
+    REQUIRE(nds.cpu7().is_halted() == false);
+
+    bios7_sleep(state, nds.arm7_bus());
+
+    REQUIRE(nds.cpu7().is_halted() == true);
+}
+
+// SWI 0x1F — CustomHalt truth table across meaningful R2 values.
+// R2 = 0x80 / 0xC0 match SWI 0x06 / 0x07 and must halt. R2 = 0x40
+// (GBA-mode bits) is no-op on NDS — halted_ stays false, proving the
+// handler does not blanket-halt independent of the written value.
+// R2 = 0xFFFFFF40 verifies GBATEK's "writes the 8bit parameter value"
+// contract: only the low byte reaches HALTCNT. If the full word leaked
+// through, bits 6-7 would decode as 0x80/0xC0 and falsely halt.
+static void bios_custom_halt_truth_table() {
+    REQUIRE(halted_after_custom_halt(0x80u) == true);
+    REQUIRE(halted_after_custom_halt(0xC0u) == true);
+    REQUIRE(halted_after_custom_halt(0x40u) == false);
+    REQUIRE(halted_after_custom_halt(0xFFFFFF40u) == false);
+}
+
 int main() {
     haltcnt_mode2_sets_halted();
     halted_cpu_burns_cycles_without_stepping();
@@ -249,6 +297,9 @@ int main() {
     wait_by_loop_zero_count_is_noop();
     wait_by_loop_max_count_no_overflow();
     wait_by_loop_clobbers_r0_to_zero();
-    std::puts("arm7_halt_test: all 9 cases passed");
+    bios_halt_writes_haltcnt_mode2();
+    bios_sleep_writes_haltcnt_mode3();
+    bios_custom_halt_truth_table();
+    std::puts("arm7_halt_test: all 12 cases passed");
     return 0;
 }
