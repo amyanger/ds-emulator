@@ -7,6 +7,9 @@ namespace ds {
 struct Arm7State;
 class Arm7Bus;
 
+// SWI 0x08 — SoundBias.
+u32 bios7_sound_bias(Arm7State& state, Arm7Bus& bus);
+
 // SWI 0x0F — IsDebugger.
 u32 bios7_is_debugger(Arm7State& state, Arm7Bus& bus);
 

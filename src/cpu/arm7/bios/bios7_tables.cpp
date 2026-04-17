@@ -1,9 +1,16 @@
 #include "cpu/arm7/bios/bios7_tables.hpp"
 
 #include "bus/arm7_bus.hpp"
+#include "bus/io_regs.hpp"
 #include "cpu/arm7/arm7_state.hpp"
 
 namespace ds {
+
+u32 bios7_sound_bias(Arm7State& state, Arm7Bus& bus) {
+    const u16 target = (state.r[0] != 0) ? u16{0x200} : u16{0x000};
+    bus.write16(IO_SOUNDBIAS, target);
+    return 1;
+}
 
 u32 bios7_is_debugger(Arm7State& state, Arm7Bus& /*bus*/) {
     state.r[0] = 0;

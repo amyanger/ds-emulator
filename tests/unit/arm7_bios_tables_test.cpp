@@ -58,6 +58,40 @@ static void soundbias_reset_restores_default() {
     REQUIRE(nds.soundbias() == 0x0200u);
 }
 
+// SWI 0x08 HLE: R0 == 0 writes 0x000 to SOUNDBIAS regardless of previous value.
+static void sound_bias_swi_r0_zero_writes_0x000() {
+    NDS nds;
+    // Seed a non-target sentinel so a no-op would leave it there.
+    nds.arm7_bus().write16(IO_SOUNDBIAS, 0x155u);
+    REQUIRE(nds.soundbias() == 0x155u);
+
+    auto& state = nds.cpu7().state();
+    state.r[0] = 0;
+    state.r[1] = 0xDEADBEEFu;
+    bios7_sound_bias(state, nds.arm7_bus());
+
+    REQUIRE(nds.soundbias() == 0x000u);
+}
+
+// SWI 0x08 HLE: any non-zero R0 writes exactly 0x200 (not R0 itself).
+static void sound_bias_swi_r0_nonzero_writes_0x200() {
+    NDS nds;
+    nds.arm7_bus().write16(IO_SOUNDBIAS, 0x155u);
+    REQUIRE(nds.soundbias() == 0x155u);
+
+    auto& state = nds.cpu7().state();
+    state.r[0] = 1;
+    state.r[1] = 0;
+    bios7_sound_bias(state, nds.arm7_bus());
+    REQUIRE(nds.soundbias() == 0x200u);
+
+    // Verify a large non-1 R0 still produces 0x200, not R0 truncated.
+    nds.arm7_bus().write16(IO_SOUNDBIAS, 0x155u);
+    state.r[0] = 0xDEADBEEFu;
+    bios7_sound_bias(state, nds.arm7_bus());
+    REQUIRE(nds.soundbias() == 0x200u);
+}
+
 static void is_debugger_returns_zero() {
     NDS nds;
     nds.cpu7().state().r[0] = 0xDEADBEEFu;
@@ -91,8 +125,10 @@ int main() {
     soundbias_write16_stores_low_10_bits();
     soundbias_write8_is_ignored();
     soundbias_reset_restores_default();
+    sound_bias_swi_r0_zero_writes_0x000();
+    sound_bias_swi_r0_nonzero_writes_0x200();
     is_debugger_returns_zero();
     get_boot_procs_returns_zeros_in_r0_r1_r3();
-    std::puts("arm7_bios_tables_test: all 7 cases passed");
+    std::puts("arm7_bios_tables_test: all 9 cases passed");
     return 0;
 }
