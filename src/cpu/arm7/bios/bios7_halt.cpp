@@ -39,22 +39,27 @@ u32 bios7_intr_wait(Arm7State& state, Arm7Bus& bus) {
 
     bus.write32(IO_IME, 1u);
 
-    // `shadow` is kept in sync with memory: after the discard branch it
-    // already has `mask` bits cleared, so the condition check below
-    // always falls through to halt on that path — which is exactly the
-    // "discard old flags, wait for new" contract.
+    // Discard only on the FIRST entry of a wait, never on halt-wake re-
+    // execution. Real BIOS loops internally (halt → wake → check), so the
+    // discard runs once. Our re-execute model would otherwise re-run the
+    // discard each iteration and clobber the bit the IRQ handler just
+    // wrote — deadlocking the wait. intr_wait_pending is the "we're in the
+    // middle of a wait" marker: set below on the halt path, cleared on the
+    // consume path.
     u32 shadow = bus.read32(kArm7BiosIrqCheckBits);
-    if (discard == 1u) {
+    if (discard == 1u && !state.intr_wait_pending) {
         shadow &= ~mask;
         bus.write32(kArm7BiosIrqCheckBits, shadow);
     }
 
     if ((shadow & mask) != 0u) {
         bus.write32(kArm7BiosIrqCheckBits, shadow & ~mask);
+        state.intr_wait_pending = false;
         return 1;
     }
 
     bus.write8(IO_HALTCNT, 0x80u);
+    state.intr_wait_pending = true;
 
     // SWI entry always banks into SVC with a valid SPSR_svc; SPSR.T picks
     // the caller-instruction size for the re-execute rewind.

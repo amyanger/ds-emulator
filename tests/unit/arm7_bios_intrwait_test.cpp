@@ -207,6 +207,60 @@ static void vblank_intrwait_discards_stale_bit_and_halts() {
     REQUIRE(nds.cpu7().is_halted() == true);
 }
 
+// Re-execution after halt-wake must NOT re-run the discard step, even
+// with R0 still set to 1. The HLE's rewind-PC-and-re-enter model means
+// the second call would otherwise clear the very bit the IRQ handler
+// set, deadlocking the wait. First invocation halts + rewinds; between
+// calls the IRQ handler sets the shadow bit; second invocation (same
+// R0=1, R1=mask) must skip discard, consume the bit, and return.
+static void intrwait_re_entry_after_halt_does_not_re_discard() {
+    NDS nds;
+    auto& state = nds.cpu7().state();
+    nds.arm7_bus().write32(kShadow, 0u);
+    state.r[0] = 1u;
+    state.r[1] = 0x1u;
+
+    constexpr u32 swi_addr = 0x02000500u;
+    enter_arm_swi_state(nds, swi_addr);
+    bios7_intr_wait(state, nds.arm7_bus());
+    REQUIRE(nds.cpu7().is_halted() == true);
+    REQUIRE(state.r[14] == swi_addr);
+    REQUIRE(state.intr_wait_pending == true);
+
+    // Simulate what the game's IRQ handler does between halt and the
+    // SWI's re-execution on wake: set the shadow bit AND re-stage R0=1
+    // (handlers often reuse R0 as scratch for the ack-write).
+    nds.arm7_bus().write32(kShadow, 0x1u);
+    nds.cpu7().set_halted(false);
+    state.r[0] = 1u;
+    state.r[1] = 0x1u;
+    state.r[14] = swi_addr + 4u; // caller's return addr re-established by SVC entry
+
+    bios7_intr_wait(state, nds.arm7_bus());
+    REQUIRE(nds.cpu7().is_halted() == false);
+    REQUIRE(nds.arm7_bus().read32(kShadow) == 0u);
+    REQUIRE(state.r[14] == swi_addr + 4u); // no second rewind
+    REQUIRE(state.intr_wait_pending == false);
+}
+
+// A fresh wait that immediately hits its condition must leave the
+// pending flag clear — guards against the flag leaking across
+// successive unrelated waits.
+static void intrwait_consume_clears_pending_flag() {
+    NDS nds;
+    auto& state = nds.cpu7().state();
+    nds.arm7_bus().write32(kShadow, 0x2u);
+    state.r[0] = 0u;
+    state.r[1] = 0x2u;
+    enter_arm_swi_state(nds, 0x02000600u);
+    state.intr_wait_pending = true; // simulated stale from a prior call
+
+    bios7_intr_wait(state, nds.arm7_bus());
+
+    REQUIRE(nds.cpu7().is_halted() == false);
+    REQUIRE(state.intr_wait_pending == false);
+}
+
 int main() {
     intrwait_condition_met_consumes_and_returns();
     intrwait_no_match_halts_and_rewinds_arm();
@@ -216,6 +270,8 @@ int main() {
     intrwait_r0_zero_unmatching_bit_halts();
     vblank_intrwait_sets_r0_r1_and_tail_calls();
     vblank_intrwait_discards_stale_bit_and_halts();
-    std::puts("arm7_bios_intrwait_test: all 8 cases passed");
+    intrwait_re_entry_after_halt_does_not_re_discard();
+    intrwait_consume_clears_pending_flag();
+    std::puts("arm7_bios_intrwait_test: all 10 cases passed");
     return 0;
 }

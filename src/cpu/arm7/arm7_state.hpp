@@ -12,13 +12,13 @@
 namespace ds {
 
 enum class Mode : u8 {
-    User       = 0x10,
-    Fiq        = 0x11,
-    Irq        = 0x12,
+    User = 0x10,
+    Fiq = 0x11,
+    Irq = 0x12,
     Supervisor = 0x13,
-    Abort      = 0x17,
-    Undefined  = 0x1B,
-    System     = 0x1F,
+    Abort = 0x17,
+    Undefined = 0x1B,
+    System = 0x1F,
 };
 
 // Banks holding the physical storage for mode-banked registers.
@@ -26,11 +26,11 @@ enum class Mode : u8 {
 // for FIQ/IRQ/SVC/ABT/UND) and the User/System bank has no SPSR.
 struct Arm7Banks {
     // User/System R8..R14 live here when CPSR mode = User or System.
-    std::array<u32, 7> user_r8_r14{};    // [0]=R8 .. [6]=R14
+    std::array<u32, 7> user_r8_r14{}; // [0]=R8 .. [6]=R14
     // FIQ has its own R8..R14.
-    std::array<u32, 7> fiq_r8_r14{};     // [0]=R8 .. [6]=R14
+    std::array<u32, 7> fiq_r8_r14{}; // [0]=R8 .. [6]=R14
     // IRQ/SVC/ABT/UND only bank R13 and R14.
-    std::array<u32, 2> irq_r13_r14{};    // [0]=R13, [1]=R14
+    std::array<u32, 2> irq_r13_r14{}; // [0]=R13, [1]=R14
     std::array<u32, 2> svc_r13_r14{};
     std::array<u32, 2> abt_r13_r14{};
     std::array<u32, 2> und_r13_r14{};
@@ -64,6 +64,20 @@ struct Arm7State {
     // Cycle counter — ARM7 cycles since reset. ARM9 cycles / 2.
     u64 cycles = 0;
 
+    // BIOS HLE bookkeeping for SWI 0x04 IntrWait (and 0x05 VBlankIntrWait).
+    // The HLE models the real BIOS's "halt + re-check" loop by halting and
+    // rewinding PC so the SWI re-executes on wake. Real BIOS discards the
+    // waited mask ONCE at entry, then loops internally; our re-execution
+    // model would otherwise re-run the discard each iteration and clobber
+    // the bit the IRQ handler just wrote. Set to true when IntrWait halts,
+    // cleared when it consumes and returns. Suppresses the discard branch
+    // on re-entry.
+    //
+    // SAVE-STATE DEBT: must be serialized when the Arm7State save/load
+    // pass lands. Dropping this on reload re-introduces the deadlock if
+    // the save is taken mid-wait.
+    bool intr_wait_pending = false;
+
     // Reset to DS post-boot defaults. Direct boot later overrides pc and
     // some registers based on the cart header; here we just give sane
     // power-on values.
@@ -73,12 +87,11 @@ struct Arm7State {
         cpsr = 0xD3;
         banks = {};
         cycles = 0;
-        load_banked_registers(Mode::Supervisor);  // establishes the invariant
+        intr_wait_pending = false;
+        load_banked_registers(Mode::Supervisor); // establishes the invariant
     }
 
-    Mode current_mode() const {
-        return static_cast<Mode>(cpsr & 0x1Fu);
-    }
+    Mode current_mode() const { return static_cast<Mode>(cpsr & 0x1Fu); }
 
     // Save the currently visible registers into the bank for `from_mode`,
     // then load the registers for `to_mode` from its bank and update
@@ -98,18 +111,22 @@ struct Arm7State {
     // exception-entry code.
     u32* spsr_slot() {
         switch (current_mode()) {
-            case Mode::Fiq:        return &banks.spsr_fiq;
-            case Mode::Irq:        return &banks.spsr_irq;
-            case Mode::Supervisor: return &banks.spsr_svc;
-            case Mode::Abort:      return &banks.spsr_abt;
-            case Mode::Undefined:  return &banks.spsr_und;
-            default:               return nullptr;  // User or System
+        case Mode::Fiq:
+            return &banks.spsr_fiq;
+        case Mode::Irq:
+            return &banks.spsr_irq;
+        case Mode::Supervisor:
+            return &banks.spsr_svc;
+        case Mode::Abort:
+            return &banks.spsr_abt;
+        case Mode::Undefined:
+            return &banks.spsr_und;
+        default:
+            return nullptr; // User or System
         }
     }
 
-    const u32* spsr_slot() const {
-        return const_cast<Arm7State*>(this)->spsr_slot();
-    }
+    const u32* spsr_slot() const { return const_cast<Arm7State*>(this)->spsr_slot(); }
 
 private:
     void store_banked_registers(Mode m) {
@@ -117,32 +134,42 @@ private:
         // "save" path except FIQ's must write R8..R12 back into the
         // User bank before we load a new mode's R13/R14.
         switch (m) {
-            case Mode::User:
-            case Mode::System:
-                for (std::size_t i = 0; i < 7; ++i) banks.user_r8_r14[i] = r[8 + i];
-                break;
-            case Mode::Fiq:
-                for (std::size_t i = 0; i < 7; ++i) banks.fiq_r8_r14[i] = r[8 + i];
-                break;
-            case Mode::Irq:
-                for (std::size_t i = 0; i < 5; ++i) banks.user_r8_r14[i] = r[8 + i];
-                banks.irq_r13_r14[0] = r[13]; banks.irq_r13_r14[1] = r[14];
-                break;
-            case Mode::Supervisor:
-                for (std::size_t i = 0; i < 5; ++i) banks.user_r8_r14[i] = r[8 + i];
-                banks.svc_r13_r14[0] = r[13]; banks.svc_r13_r14[1] = r[14];
-                break;
-            case Mode::Abort:
-                for (std::size_t i = 0; i < 5; ++i) banks.user_r8_r14[i] = r[8 + i];
-                banks.abt_r13_r14[0] = r[13]; banks.abt_r13_r14[1] = r[14];
-                break;
-            case Mode::Undefined:
-                for (std::size_t i = 0; i < 5; ++i) banks.user_r8_r14[i] = r[8 + i];
-                banks.und_r13_r14[0] = r[13]; banks.und_r13_r14[1] = r[14];
-                break;
-            default:
-                assert(false && "Arm7State::switch_mode: invalid Mode value");
-                break;
+        case Mode::User:
+        case Mode::System:
+            for (std::size_t i = 0; i < 7; ++i)
+                banks.user_r8_r14[i] = r[8 + i];
+            break;
+        case Mode::Fiq:
+            for (std::size_t i = 0; i < 7; ++i)
+                banks.fiq_r8_r14[i] = r[8 + i];
+            break;
+        case Mode::Irq:
+            for (std::size_t i = 0; i < 5; ++i)
+                banks.user_r8_r14[i] = r[8 + i];
+            banks.irq_r13_r14[0] = r[13];
+            banks.irq_r13_r14[1] = r[14];
+            break;
+        case Mode::Supervisor:
+            for (std::size_t i = 0; i < 5; ++i)
+                banks.user_r8_r14[i] = r[8 + i];
+            banks.svc_r13_r14[0] = r[13];
+            banks.svc_r13_r14[1] = r[14];
+            break;
+        case Mode::Abort:
+            for (std::size_t i = 0; i < 5; ++i)
+                banks.user_r8_r14[i] = r[8 + i];
+            banks.abt_r13_r14[0] = r[13];
+            banks.abt_r13_r14[1] = r[14];
+            break;
+        case Mode::Undefined:
+            for (std::size_t i = 0; i < 5; ++i)
+                banks.user_r8_r14[i] = r[8 + i];
+            banks.und_r13_r14[0] = r[13];
+            banks.und_r13_r14[1] = r[14];
+            break;
+        default:
+            assert(false && "Arm7State::switch_mode: invalid Mode value");
+            break;
         }
     }
 
@@ -151,34 +178,44 @@ private:
         // R8..R12 are only banked in FIQ mode; all other modes share the
         // User/System copies.
         switch (m) {
-            case Mode::User:
-            case Mode::System:
-                for (std::size_t i = 0; i < 7; ++i) r[8 + i] = banks.user_r8_r14[i];
-                break;
-            case Mode::Fiq:
-                for (std::size_t i = 0; i < 7; ++i) r[8 + i] = banks.fiq_r8_r14[i];
-                break;
-            case Mode::Irq:
-                for (std::size_t i = 0; i < 5; ++i) r[8 + i] = banks.user_r8_r14[i];  // R8..R12
-                r[13] = banks.irq_r13_r14[0]; r[14] = banks.irq_r13_r14[1];
-                break;
-            case Mode::Supervisor:
-                for (std::size_t i = 0; i < 5; ++i) r[8 + i] = banks.user_r8_r14[i];
-                r[13] = banks.svc_r13_r14[0]; r[14] = banks.svc_r13_r14[1];
-                break;
-            case Mode::Abort:
-                for (std::size_t i = 0; i < 5; ++i) r[8 + i] = banks.user_r8_r14[i];
-                r[13] = banks.abt_r13_r14[0]; r[14] = banks.abt_r13_r14[1];
-                break;
-            case Mode::Undefined:
-                for (std::size_t i = 0; i < 5; ++i) r[8 + i] = banks.user_r8_r14[i];
-                r[13] = banks.und_r13_r14[0]; r[14] = banks.und_r13_r14[1];
-                break;
-            default:
-                assert(false && "Arm7State::switch_mode: invalid Mode value");
-                break;
+        case Mode::User:
+        case Mode::System:
+            for (std::size_t i = 0; i < 7; ++i)
+                r[8 + i] = banks.user_r8_r14[i];
+            break;
+        case Mode::Fiq:
+            for (std::size_t i = 0; i < 7; ++i)
+                r[8 + i] = banks.fiq_r8_r14[i];
+            break;
+        case Mode::Irq:
+            for (std::size_t i = 0; i < 5; ++i)
+                r[8 + i] = banks.user_r8_r14[i]; // R8..R12
+            r[13] = banks.irq_r13_r14[0];
+            r[14] = banks.irq_r13_r14[1];
+            break;
+        case Mode::Supervisor:
+            for (std::size_t i = 0; i < 5; ++i)
+                r[8 + i] = banks.user_r8_r14[i];
+            r[13] = banks.svc_r13_r14[0];
+            r[14] = banks.svc_r13_r14[1];
+            break;
+        case Mode::Abort:
+            for (std::size_t i = 0; i < 5; ++i)
+                r[8 + i] = banks.user_r8_r14[i];
+            r[13] = banks.abt_r13_r14[0];
+            r[14] = banks.abt_r13_r14[1];
+            break;
+        case Mode::Undefined:
+            for (std::size_t i = 0; i < 5; ++i)
+                r[8 + i] = banks.user_r8_r14[i];
+            r[13] = banks.und_r13_r14[0];
+            r[14] = banks.und_r13_r14[1];
+            break;
+        default:
+            assert(false && "Arm7State::switch_mode: invalid Mode value");
+            break;
         }
     }
 };
 
-}  // namespace ds
+} // namespace ds
