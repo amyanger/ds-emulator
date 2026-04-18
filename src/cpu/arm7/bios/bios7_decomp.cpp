@@ -68,8 +68,43 @@ u32 bios7_bit_unpack(Arm7State& state, Arm7Bus& bus) {
     return 1;
 }
 
-u32 bios7_lz77_uncomp_wram(Arm7State& /*state*/, Arm7Bus& /*bus*/) {
-    DS_LOG_WARN("arm7/bios: SWI 0x11 LZ77UnComp(Wram) not yet implemented (slice 3f scaffold)");
+u32 bios7_lz77_uncomp_wram(Arm7State& state, Arm7Bus& bus) {
+    const u32 src = state.r[0];
+    const u32 dest = state.r[1];
+
+    const auto hdr = bios7_decomp_parse_header(bus, src);
+    if (hdr.type != 1u) {
+        DS_LOG_WARN("arm7/bios: LZ77 SWI 0x11 with header type %u (expected 1)", hdr.type);
+    }
+
+    u32 src_addr = src + 4u;
+    u32 dest_addr = dest;
+    u32 written = 0u;
+
+    while (written < hdr.size) {
+        const u8 flags = bus.read8(src_addr++);
+        for (int bit = 7; bit >= 0 && written < hdr.size; --bit) {
+            const bool compressed = ((flags >> bit) & 1u) != 0u;
+            if (!compressed) {
+                const u8 byte = bus.read8(src_addr++);
+                bus.write8(dest_addr++, byte);
+                ++written;
+            } else {
+                const u8 b0 = bus.read8(src_addr++);
+                const u8 b1 = bus.read8(src_addr++);
+                const u32 len = ((static_cast<u32>(b0) >> 4) & 0x0Fu) + 3u;
+                const u32 disp = (((static_cast<u32>(b0) & 0x0Fu) << 8) | b1) + 1u;
+                // Self-overlap (disp <= len) is supported because bus.write8
+                // is synchronous: the next iteration's read sees the byte
+                // written this iteration (Wram variant only).
+                for (u32 i = 0; i < len && written < hdr.size; ++i) {
+                    const u8 byte = bus.read8(dest_addr - disp);
+                    bus.write8(dest_addr++, byte);
+                    ++written;
+                }
+            }
+        }
+    }
     return 1;
 }
 
