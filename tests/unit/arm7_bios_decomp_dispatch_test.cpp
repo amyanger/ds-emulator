@@ -150,16 +150,44 @@ static void dispatch_0x12_lz77_vram_real() {
     REQUIRE(state.current_mode() == Mode::User);
 }
 
-static void dispatch_0x13_huff_callback_stub() {
+// Smoke test — algorithm correctness is covered by arm7_bios_huffman_test.
+// Header size=0 so the decode loop never runs; Get_32bit is never invoked.
+// tree_size_byte=0 still forces a 2-byte tree fetch through Get_8bit (zero
+// bytes of actual table traversal, but the cursor still advances — matching
+// real BIOS which unconditionally copies the tree before checking size).
+static void dispatch_0x13_huff_uncomp() {
     NDS nds;
     auto& state = nds.cpu7().state();
+    auto& bus = nds.arm7_bus();
+
+    // Open returns 0x0028 → data_size_bits=8 (bits 0-3), type=2 (bits 4-7),
+    // size=0 (bits 8-31). MOV R0, #0x28 is a rotated-imm encoding #imm=0x28.
+    bus.write32(kCbOpen + 0u, 0xE3A0'0028u); // MOV R0, #0x28
+    bus.write32(kCbOpen + 4u, 0xE12F'FF1Eu); // BX LR
+    // Get_8bit returns 0 regardless of input — fine for the size=0 path where
+    // the returned tree_size and tree bytes are ignored by the empty loop.
+    bus.write32(kCbGet8 + 0u, 0xE3A0'0000u); // MOV R0, #0
+    bus.write32(kCbGet8 + 4u, 0xE12F'FF1Eu); // BX LR
+    // Get_32bit pointer must be valid (read_decomp_callbacks dereferences it)
+    // even though size=0 means the bitstream is never consumed.
+    bus.write32(kCbGet8 + 0x20u, 0xE3A0'0000u); // MOV R0, #0
+    bus.write32(kCbGet8 + 0x24u, 0xE12F'FF1Eu); // BX LR
+
+    bus.write32(kCbStruct + 0x00u, kCbOpen);
+    bus.write32(kCbStruct + 0x04u, 0u); // Close = 0 → skip
+    bus.write32(kCbStruct + 0x08u, kCbGet8);
+    bus.write32(kCbStruct + 0x0Cu, 0u);
+    bus.write32(kCbStruct + 0x10u, kCbGet8 + 0x20u);
 
     enter_arm_swi_state(nds, kSwiPc);
     state.r[0] = kSentinelR0;
+    state.r[1] = kCbDstV;
+    state.r[2] = 0u;
+    state.r[3] = kCbStruct;
 
     arm7_bios_hle_dispatch_swi(nds.cpu7(), 0x13u);
 
-    REQUIRE(state.r[0] == kSentinelR0);
+    REQUIRE(state.current_mode() == Mode::User);
 }
 
 // Smoke test — algorithm correctness is covered by arm7_bios_rle_vram_test.
@@ -198,7 +226,7 @@ int main() {
     dispatch_0x11_lz77_wram();
     dispatch_0x14_rl_wram();
     dispatch_0x12_lz77_vram_real();
-    dispatch_0x13_huff_callback_stub();
+    dispatch_0x13_huff_uncomp();
     dispatch_0x15_rl_vram_real();
     std::puts("arm7_bios_decomp_dispatch_test: all 6 cases passed");
     return 0;

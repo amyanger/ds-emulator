@@ -69,7 +69,7 @@ u32 arm7_bios_hle_dispatch_swi(Arm7& cpu, u32 swi_number) {
         cycles = bios7_lz77_uncomp_vram(cpu);
         break;
     case 0x13:
-        cycles = bios7_huff_callback_stub(state, bus);
+        cycles = bios7_huff_uncomp(cpu);
         break;
     case 0x14:
         cycles = bios7_rl_uncomp_wram(state, bus);

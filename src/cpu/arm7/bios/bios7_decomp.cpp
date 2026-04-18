@@ -159,12 +159,4 @@ DecompCallbacks read_decomp_callbacks(Arm7Bus& bus, u32 r3) {
     return cb;
 }
 
-// Distinct stubs (rather than one shared warn) so runtime triage can tell
-// which callback path a game expects before the real impl lands.
-
-u32 bios7_huff_callback_stub(Arm7State& /*state*/, Arm7Bus& /*bus*/) {
-    DS_LOG_WARN("arm7/bios: SWI 0x13 HuffUnComp(callback) not implemented (slice 3g)");
-    return 1;
-}
-
 } // namespace ds

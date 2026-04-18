@@ -161,13 +161,37 @@ static void arm_swi_0x12_lz77_callback_real() {
     REQUIRE(state.pc == kArmBase + 4u);
 }
 
-// Case 6: ARM-state SWI 0x13 — HuffUnComp(callback) warn-stub (slice 3g).
-static void arm_swi_0x13_huff_callback_stub() {
+// Case 6: ARM-state SWI 0x13 — HuffUnComp(callback). Real handler invokes the
+// trampoline (Open + tree fetch via Get_8bit), so cycle cost varies with guest
+// callback instructions; step-until-return and verify the dispatcher's
+// MOVS PC, R14 tail. Minimal callbacks: Open returns a header with size=0,
+// type=2, data_size_bits=8; Get_8bit / Get_32bit return 0; Close=0.
+static void arm_swi_0x13_huff_callback_real() {
     NDS nds;
     auto& state = nds.cpu7().state();
+    auto& bus = nds.arm7_bus();
+
+    constexpr u32 kOpen = 0x0200'1000u;   // Open: MOV R0, #0x28; BX LR (type=2, size=0, ds=8)
+    constexpr u32 kGet8 = 0x0200'1040u;   // Get_8bit: MOV R0, #0; BX LR
+    constexpr u32 kGet32 = 0x0200'1080u;  // Get_32bit: MOV R0, #0; BX LR
+    constexpr u32 kStruct = 0x0200'1100u; // 5 × u32 callback struct
+    constexpr u32 kDst = 0x0200'1200u;
+    bus.write32(kOpen + 0u, 0xE3A0'0028u);  // MOV R0, #0x28 (type=2, ds=8, size=0)
+    bus.write32(kOpen + 4u, 0xE12F'FF1Eu);  // BX LR
+    bus.write32(kGet8 + 0u, 0xE3A0'0000u);  // MOV R0, #0
+    bus.write32(kGet8 + 4u, 0xE12F'FF1Eu);  // BX LR
+    bus.write32(kGet32 + 0u, 0xE3A0'0000u); // MOV R0, #0
+    bus.write32(kGet32 + 4u, 0xE12F'FF1Eu); // BX LR
+    bus.write32(kStruct + 0x00u, kOpen);
+    bus.write32(kStruct + 0x04u, 0u);
+    bus.write32(kStruct + 0x08u, kGet8);
+    bus.write32(kStruct + 0x0Cu, 0u);
+    bus.write32(kStruct + 0x10u, kGet32);
 
     const u32 pre_cpsr = seed_arm_caller(nds, Mode::User);
-    run_one_arm_swi(nds, kArmBase, 0xEF000013u); // SWI #0x13
+    state.r[1] = kDst;
+    state.r[3] = kStruct;
+    ds::test::run_until_returns(nds, kArmBase, 0xEF000013u, kArmBase + 4u);
 
     REQUIRE(state.current_mode() == Mode::User);
     REQUIRE(state.cpsr == pre_cpsr);
@@ -306,7 +330,7 @@ int main() {
     arm_swi_0x10_bit_unpack_scaffold();
     arm_swi_0x11_lz77_wram_scaffold();
     arm_swi_0x12_lz77_callback_real();
-    arm_swi_0x13_huff_callback_stub();
+    arm_swi_0x13_huff_callback_real();
     arm_swi_0x14_rl_wram_scaffold();
     arm_swi_0x15_rl_callback_real();
     arm_swi_0x01_invalid_default();
