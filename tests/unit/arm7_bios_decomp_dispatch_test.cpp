@@ -113,16 +113,41 @@ static void dispatch_0x14_rl_wram() {
 
 constexpr u32 kSentinelR0 = 0xDEAD'BEEFu;
 
-static void dispatch_0x12_lz77_callback_stub() {
+// Isolated from kSrc/kDst (used by 0x10/0x11/0x14) to avoid overlap.
+constexpr u32 kCbStruct = 0x0200'0400u;
+constexpr u32 kCbOpen = 0x0200'0500u;
+constexpr u32 kCbGet8 = 0x0200'0540u;
+constexpr u32 kCbDstV = 0x0200'0600u;
+
+// Smoke test — algorithm correctness is covered by arm7_bios_lz77_vram_test.
+// Header size=0 so the inner loop never runs; Get_8bit is never invoked.
+static void dispatch_0x12_lz77_vram_real() {
     NDS nds;
     auto& state = nds.cpu7().state();
+    auto& bus = nds.arm7_bus();
+
+    bus.write32(kCbOpen + 0u, 0xE3A0'0010u); // MOV R0, #0x10 (type=1, size=0)
+    bus.write32(kCbOpen + 4u, 0xE12F'FF1Eu); // BX LR
+    // Get_8bit pointer must be valid (read_decomp_callbacks dereferences it)
+    // even though the size=0 header means it is never called.
+    bus.write32(kCbGet8 + 0u, 0xE3A0'0000u); // MOV R0, #0
+    bus.write32(kCbGet8 + 4u, 0xE12F'FF1Eu); // BX LR
+
+    bus.write32(kCbStruct + 0x00u, kCbOpen);
+    bus.write32(kCbStruct + 0x04u, 0u); // Close = 0 → skip
+    bus.write32(kCbStruct + 0x08u, kCbGet8);
+    bus.write32(kCbStruct + 0x0Cu, 0u);
+    bus.write32(kCbStruct + 0x10u, 0u);
 
     enter_arm_swi_state(nds, kSwiPc);
     state.r[0] = kSentinelR0;
+    state.r[1] = kCbDstV;
+    state.r[2] = 0u;
+    state.r[3] = kCbStruct;
 
     arm7_bios_hle_dispatch_swi(nds.cpu7(), 0x12u);
 
-    REQUIRE(state.r[0] == kSentinelR0);
+    REQUIRE(state.current_mode() == Mode::User);
 }
 
 static void dispatch_0x13_huff_callback_stub() {
@@ -149,29 +174,13 @@ static void dispatch_0x15_rl_callback_stub() {
     REQUIRE(state.r[0] == kSentinelR0);
 }
 
-// Distinct-address fallback for log-message verification: the project's
-// logging is a bare fprintf macro with no sink-override hook, so spec §6.4
-// allows proving the three callback cases dispatch to three distinct
-// functions rather than capturing the warn-message content.
-static void callback_stubs_are_distinct_functions() {
-    using StubFn = u32 (*)(Arm7State&, Arm7Bus&);
-    const StubFn lz77 = &bios7_lz77_callback_stub;
-    const StubFn huff = &bios7_huff_callback_stub;
-    const StubFn rl = &bios7_rl_callback_stub;
-
-    REQUIRE(lz77 != huff);
-    REQUIRE(huff != rl);
-    REQUIRE(lz77 != rl);
-}
-
 int main() {
     dispatch_0x10_bit_unpack();
     dispatch_0x11_lz77_wram();
     dispatch_0x14_rl_wram();
-    dispatch_0x12_lz77_callback_stub();
+    dispatch_0x12_lz77_vram_real();
     dispatch_0x13_huff_callback_stub();
     dispatch_0x15_rl_callback_stub();
-    callback_stubs_are_distinct_functions();
-    std::puts("arm7_bios_decomp_dispatch_test: all 7 cases passed");
+    std::puts("arm7_bios_decomp_dispatch_test: all 6 cases passed");
     return 0;
 }

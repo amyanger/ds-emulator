@@ -21,6 +21,7 @@ add_library(ds_core STATIC
     cpu/arm7/bios/bios7_hle.cpp
     cpu/arm7/bios/bios7_trampoline.cpp
     cpu/arm7/bios/bios7_decomp.cpp
+    cpu/arm7/bios/bios7_decomp_lz77_vram.cpp
     cpu/arm7/bios/bios7_halt.cpp
     cpu/arm7/bios/bios7_math.cpp
     cpu/arm7/bios/bios7_memcpy.cpp

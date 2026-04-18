@@ -411,12 +411,16 @@ either).
 ```cpp
 // Pseudocode — slice 3g LZ77 Vram.
 u32 bios7_lz77_uncomp_vram(Arm7State& s, Arm7Bus& bus, Arm7& cpu) {
-    const u32 callback_param = s.r[2];
+    // GBATEK: entry R0 is the "source address" — an opaque handle passed
+    // as R0 to every callback (Open, Get_8bit, Close). Entry R2 is the
+    // user-defined callback parameter, passed to Open only.
+    const u32 callback_param = s.r[0];
     const DecompCallbacks cb = read_decomp_callbacks(bus, s.r[3]);
 
-    // Open_and_get_32bit returns the header (first 32-bit word of source).
+    // Open_and_get_32bit receives (R0=entry_R0, R1=dest, R2=user_param)
+    // and returns the header word in R0.
     const u32 hdr_word = trampoline_call(cpu, bus, cb.open_and_get_32bit,
-                                          {callback_param, 0, 0, 0});
+                                          {callback_param, s.r[1], s.r[2], 0});
     const DecompHeader hdr = split_header(hdr_word);
 
     u32 dest = s.r[1];
@@ -593,11 +597,31 @@ GBATEK: "Callback structure (five 32bit pointers to callback functions):
 
 **Offsets:** +0x00, +0x04, +0x08, +0x0C, +0x10. All 32-bit, little-endian.
 **Thumb dispatch:** bit 0 of each pointer selects Thumb (1) or ARM (0).
+
+**R0 semantics (all three SWIs):** GBATEK calls this the "source address,"
+but for the callback variants it is simply an opaque handle — typically a
+pointer to game-maintained callback state. The BIOS passes entry-R0 as
+the R0 argument to *every* callback invocation (Open, Get_8bit,
+Get_32bit, Close). Our HLE does the same.
+
+**R1 semantics (all three SWIs):** initial destination address. Passed
+to Open as its R1 argument. Not passed to Get_8bit / Get_32bit / Close.
+
 **R2 semantics:**
-- LZ77 / RLE callbacks: opaque "Callback parameter", passed to every
-  callback via R0.
-- Huffman: R2 is a pointer to a temp buffer (≤ 0x200 bytes), not a
-  parameter — no callback receives R2 as an arg.
+- LZ77 / RLE callbacks (0x12, 0x15): "user-defined callback parameter
+  passed on to Open function" — passed only to Open, as its R2
+  argument. Not passed to Get_8bit or Close.
+- Huffman (0x13): R2 is a pointer to a temp buffer (≤ 0x200 bytes) used
+  internally by the BIOS to copy the Huffman tree for cheap walking.
+  It is passed to Open as its R2 argument (since Open receives the
+  register file as-is), but most callbacks ignore it. No Get_* callback
+  receives R2.
+
+**Call ABI summary:**
+- `Open(R0=entry_R0, R1=entry_R1=dest, R2=entry_R2)` → returns header in R0.
+- `Get_8bit(R0=entry_R0)` → returns byte in R0.
+- `Get_32bit(R0=entry_R0)` → returns word in R0 (Huffman only).
+- `Close(R0=entry_R0)` → return value ignored.
 
 ### 5.2 Return values
 

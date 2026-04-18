@@ -5,16 +5,18 @@
 
 namespace ds {
 
-// Per spec §4.3: a single 32-bit bus read at the source address yields the
-// shared LZ77/RLE header. Reserved bits 0-3 are not validated (matches
-// hardware). Type validation is the algorithm's job — a mismatch warns and
-// decompresses anyway, same as real BIOS.
-DecompHeader bios7_decomp_parse_header(Arm7Bus& bus, u32 src_addr) {
-    const u32 hdr = bus.read32(src_addr);
+DecompHeader bios7_decomp_split_header(u32 hdr_word) {
     return DecompHeader{
-        static_cast<u8>(bits<u32>(hdr, 7, 4)),
-        bits<u32>(hdr, 31, 8),
+        static_cast<u8>(bits<u32>(hdr_word, 7, 4)),
+        bits<u32>(hdr_word, 31, 8),
     };
+}
+
+// Reserved bits 0-3 are not validated — real BIOS does not check them either.
+// Type validation is the algorithm's job: a mismatch warns and decompresses
+// anyway.
+DecompHeader bios7_decomp_parse_header(Arm7Bus& bus, u32 src_addr) {
+    return bios7_decomp_split_header(bus.read32(src_addr));
 }
 
 // Slice 3f commit 1 scaffolds the three ReadNormal entry points. Each warns
@@ -145,15 +147,20 @@ u32 bios7_rl_uncomp_wram(Arm7State& state, Arm7Bus& bus) {
     return 1;
 }
 
-// Per spec §4.7: the three ReadByCallback variants ship as distinct warn-stubs
-// so runtime triage can tell which callback path a game expects. R0 and the
-// callback structure in R3 are deliberately untouched — slice 3g fills in the
-// re-entrant interpreter trampoline that actually drives the callbacks.
-
-u32 bios7_lz77_callback_stub(Arm7State& /*state*/, Arm7Bus& /*bus*/) {
-    DS_LOG_WARN("arm7/bios: SWI 0x12 LZ77UnComp(callback,Vram) not implemented (slice 3g)");
-    return 1;
+// Per spec §4.5: fetch all five callback pointers up-front. Real BIOS does not
+// re-read them mid-decompression, and neither do we.
+DecompCallbacks read_decomp_callbacks(Arm7Bus& bus, u32 r3) {
+    DecompCallbacks cb{};
+    cb.open_and_get_32bit = bus.read32(r3 + 0x00u);
+    cb.close = bus.read32(r3 + 0x04u);
+    cb.get_8bit = bus.read32(r3 + 0x08u);
+    cb.get_16bit = bus.read32(r3 + 0x0Cu);
+    cb.get_32bit = bus.read32(r3 + 0x10u);
+    return cb;
 }
+
+// Distinct stubs (rather than one shared warn) so runtime triage can tell
+// which callback path a game expects before the real impl lands.
 
 u32 bios7_huff_callback_stub(Arm7State& /*state*/, Arm7Bus& /*bus*/) {
     DS_LOG_WARN("arm7/bios: SWI 0x13 HuffUnComp(callback) not implemented (slice 3g)");
