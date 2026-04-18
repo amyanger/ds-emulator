@@ -162,16 +162,35 @@ static void dispatch_0x13_huff_callback_stub() {
     REQUIRE(state.r[0] == kSentinelR0);
 }
 
-static void dispatch_0x15_rl_callback_stub() {
+// Smoke test — algorithm correctness is covered by arm7_bios_rle_vram_test.
+// Header size=0 so the inner loop never runs; Get_8bit is never invoked.
+static void dispatch_0x15_rl_vram_real() {
     NDS nds;
     auto& state = nds.cpu7().state();
+    auto& bus = nds.arm7_bus();
+
+    bus.write32(kCbOpen + 0u, 0xE3A0'0030u); // MOV R0, #0x30 (type=3, size=0)
+    bus.write32(kCbOpen + 4u, 0xE12F'FF1Eu); // BX LR
+    // Get_8bit pointer must be valid (read_decomp_callbacks dereferences it)
+    // even though the size=0 header means it is never called.
+    bus.write32(kCbGet8 + 0u, 0xE3A0'0000u); // MOV R0, #0
+    bus.write32(kCbGet8 + 4u, 0xE12F'FF1Eu); // BX LR
+
+    bus.write32(kCbStruct + 0x00u, kCbOpen);
+    bus.write32(kCbStruct + 0x04u, 0u); // Close = 0 → skip
+    bus.write32(kCbStruct + 0x08u, kCbGet8);
+    bus.write32(kCbStruct + 0x0Cu, 0u);
+    bus.write32(kCbStruct + 0x10u, 0u);
 
     enter_arm_swi_state(nds, kSwiPc);
     state.r[0] = kSentinelR0;
+    state.r[1] = kCbDstV;
+    state.r[2] = 0u;
+    state.r[3] = kCbStruct;
 
     arm7_bios_hle_dispatch_swi(nds.cpu7(), 0x15u);
 
-    REQUIRE(state.r[0] == kSentinelR0);
+    REQUIRE(state.current_mode() == Mode::User);
 }
 
 int main() {
@@ -180,7 +199,7 @@ int main() {
     dispatch_0x14_rl_wram();
     dispatch_0x12_lz77_vram_real();
     dispatch_0x13_huff_callback_stub();
-    dispatch_0x15_rl_callback_stub();
+    dispatch_0x15_rl_vram_real();
     std::puts("arm7_bios_decomp_dispatch_test: all 6 cases passed");
     return 0;
 }

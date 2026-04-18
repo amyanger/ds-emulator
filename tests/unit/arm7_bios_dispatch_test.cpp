@@ -187,13 +187,31 @@ static void arm_swi_0x14_rl_wram_scaffold() {
     REQUIRE(state.pc == kArmBase + 4u);
 }
 
-// Case 8: ARM-state SWI 0x15 — RLUnComp(callback,Vram) warn-stub (slice 3g).
-static void arm_swi_0x15_rl_callback_stub() {
+// Case 8: ARM-state SWI 0x15 — RLUnComp(callback,Vram). Real handler
+// invokes the trampoline, so cycle cost varies with callback instructions;
+// we step-until-return and then verify the dispatcher's MOVS PC, R14 tail
+// (PC at instr+4, CPSR restored from SPSR_svc). Minimal callbacks: Open
+// returns a header with size=0 so the inner loop never runs; Close = 0.
+static void arm_swi_0x15_rl_callback_real() {
     NDS nds;
     auto& state = nds.cpu7().state();
+    auto& bus = nds.arm7_bus();
+
+    constexpr u32 kOpen = 0x0200'1000u;   // Open: MOV R0, #0x30; BX LR (header=type 3, size 0)
+    constexpr u32 kStruct = 0x0200'1100u; // 5 × u32 callback struct
+    constexpr u32 kDst = 0x0200'1200u;
+    bus.write32(kOpen + 0u, 0xE3A0'0030u); // MOV R0, #0x30 (type=3, size=0)
+    bus.write32(kOpen + 4u, 0xE12F'FF1Eu); // BX LR
+    bus.write32(kStruct + 0x00u, kOpen);
+    bus.write32(kStruct + 0x04u, 0u);
+    bus.write32(kStruct + 0x08u, 0u);
+    bus.write32(kStruct + 0x0Cu, 0u);
+    bus.write32(kStruct + 0x10u, 0u);
 
     const u32 pre_cpsr = seed_arm_caller(nds, Mode::User);
-    run_one_arm_swi(nds, kArmBase, 0xEF000015u); // SWI #0x15
+    state.r[1] = kDst;
+    state.r[3] = kStruct;
+    ds::test::run_until_returns(nds, kArmBase, 0xEF000015u, kArmBase + 4u);
 
     REQUIRE(state.current_mode() == Mode::User);
     REQUIRE(state.cpsr == pre_cpsr);
@@ -290,7 +308,7 @@ int main() {
     arm_swi_0x12_lz77_callback_real();
     arm_swi_0x13_huff_callback_stub();
     arm_swi_0x14_rl_wram_scaffold();
-    arm_swi_0x15_rl_callback_stub();
+    arm_swi_0x15_rl_callback_real();
     arm_swi_0x01_invalid_default();
     arm_swi_0x02_invalid_default();
     thumb_swi_0x0a_invalid_default();

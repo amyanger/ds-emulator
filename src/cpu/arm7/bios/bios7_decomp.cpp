@@ -167,9 +167,4 @@ u32 bios7_huff_callback_stub(Arm7State& /*state*/, Arm7Bus& /*bus*/) {
     return 1;
 }
 
-u32 bios7_rl_callback_stub(Arm7State& /*state*/, Arm7Bus& /*bus*/) {
-    DS_LOG_WARN("arm7/bios: SWI 0x15 RLUnComp(callback,Vram) not implemented (slice 3g)");
-    return 1;
-}
-
 } // namespace ds

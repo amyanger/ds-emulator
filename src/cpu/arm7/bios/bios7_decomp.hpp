@@ -71,7 +71,10 @@ u32 bios7_lz77_uncomp_vram(Arm7& cpu);
 // SWI 0x13 — HuffUnCompReadByCallback warn-stub.
 u32 bios7_huff_callback_stub(Arm7State& state, Arm7Bus& bus);
 
-// SWI 0x15 — RLUnCompReadByCallbackWrite16bit warn-stub.
-u32 bios7_rl_callback_stub(Arm7State& state, Arm7Bus& bus);
+// SWI 0x15 — RLUnCompReadByCallbackWrite16bit. Callback-driven RLE with
+// 16-bit destination writes. Reads source bytes via `Get_8bit` callbacks;
+// writes output as 16-bit halfwords. Takes `Arm7&` (not just `Arm7State&`)
+// because the trampoline steps the interpreter to invoke guest callbacks.
+u32 bios7_rl_uncomp_vram(Arm7& cpu);
 
 } // namespace ds
