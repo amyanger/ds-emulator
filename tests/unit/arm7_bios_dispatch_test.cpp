@@ -66,7 +66,7 @@ static u32 seed_arm_caller(NDS& nds, Mode caller_mode) {
 
 } // namespace
 
-// Case 1: ARM-state SWI 0x00 (SoftReset warn-stub). After the dispatcher
+// ARM-state SWI 0x00 (SoftReset warn-stub). After the dispatcher
 // returns, PC must be at instr_addr + 4, and CPSR must be restored from
 // SPSR_svc (User mode, I=0, T=0).
 static void arm_swi_0x00_returns_to_caller() {
@@ -83,7 +83,7 @@ static void arm_swi_0x00_returns_to_caller() {
     REQUIRE(state.pc == kArmBase + 4u);
 }
 
-// Case 2: Thumb-state SWI 0x00. Thumb return_addr = instr_addr + 2, and the
+// Thumb-state SWI 0x00. Thumb return_addr = instr_addr + 2, and the
 // restored CPSR must have T=1 (we came from Thumb).
 static void thumb_swi_0x00_returns_to_caller() {
     NDS nds;
@@ -103,7 +103,7 @@ static void thumb_swi_0x00_returns_to_caller() {
     REQUIRE(state.pc == kThumbBase + 2u);
 }
 
-// Case 3: ARM-state SWI 0x10 — BitUnPack scaffold (slice 3f commit 1).
+// ARM-state SWI 0x10 — BitUnPack scaffold (slice 3f commit 1).
 // Returns 1 cycle with R0/CPSR untouched; commit 2 fills in the algorithm.
 static void arm_swi_0x10_bit_unpack_scaffold() {
     NDS nds;
@@ -117,7 +117,7 @@ static void arm_swi_0x10_bit_unpack_scaffold() {
     REQUIRE(state.pc == kArmBase + 4u);
 }
 
-// Case 4: ARM-state SWI 0x11 — LZ77UnComp(Wram) scaffold.
+// ARM-state SWI 0x11 — LZ77UnComp(Wram) scaffold.
 static void arm_swi_0x11_lz77_wram_scaffold() {
     NDS nds;
     auto& state = nds.cpu7().state();
@@ -130,7 +130,7 @@ static void arm_swi_0x11_lz77_wram_scaffold() {
     REQUIRE(state.pc == kArmBase + 4u);
 }
 
-// Case 5: ARM-state SWI 0x12 — LZ77UnComp(callback,Vram). Real handler
+// ARM-state SWI 0x12 — LZ77UnComp(callback,Vram). Real handler
 // invokes the trampoline, so cycle cost varies with callback instructions;
 // we step-until-return and then verify the dispatcher's MOVS PC, R14 tail
 // (PC at instr+4, CPSR restored from SPSR_svc). Minimal callbacks: Open
@@ -161,7 +161,7 @@ static void arm_swi_0x12_lz77_callback_real() {
     REQUIRE(state.pc == kArmBase + 4u);
 }
 
-// Case 6: ARM-state SWI 0x13 — HuffUnComp(callback). Real handler invokes the
+// ARM-state SWI 0x13 — HuffUnComp(callback). Real handler invokes the
 // trampoline (Open + tree fetch via Get_8bit), so cycle cost varies with guest
 // callback instructions; step-until-return and verify the dispatcher's
 // MOVS PC, R14 tail. Minimal callbacks: Open returns a header with size=0,
@@ -198,7 +198,7 @@ static void arm_swi_0x13_huff_callback_real() {
     REQUIRE(state.pc == kArmBase + 4u);
 }
 
-// Case 7: ARM-state SWI 0x14 — RLUnComp(Wram) scaffold.
+// ARM-state SWI 0x14 — RLUnComp(Wram) scaffold.
 static void arm_swi_0x14_rl_wram_scaffold() {
     NDS nds;
     auto& state = nds.cpu7().state();
@@ -211,7 +211,7 @@ static void arm_swi_0x14_rl_wram_scaffold() {
     REQUIRE(state.pc == kArmBase + 4u);
 }
 
-// Case 8: ARM-state SWI 0x15 — RLUnComp(callback,Vram). Real handler
+// ARM-state SWI 0x15 — RLUnComp(callback,Vram). Real handler
 // invokes the trampoline, so cycle cost varies with callback instructions;
 // we step-until-return and then verify the dispatcher's MOVS PC, R14 tail
 // (PC at instr+4, CPSR restored from SPSR_svc). Minimal callbacks: Open
@@ -242,7 +242,24 @@ static void arm_swi_0x15_rl_callback_real() {
     REQUIRE(state.pc == kArmBase + 4u);
 }
 
-// Case 9: ARM-state SWI 0x01 — invalid, hits the `default` warn path.
+// ARM-state SWI 0x1A — GetSineTable. Dispatcher routes to the real
+// handler (slice 3h commit 2). R0 = 32 → 0x5A82 proves the case row landed
+// on bios7_get_sine_table; the dispatcher's MOVS PC, R14 tail still applies.
+static void arm_swi_0x1a_get_sine_table() {
+    NDS nds;
+    auto& state = nds.cpu7().state();
+
+    const u32 pre_cpsr = seed_arm_caller(nds, Mode::User);
+    state.r[0] = 32u;
+    run_one_arm_swi(nds, kArmBase, 0xEF00001Au); // SWI #0x1A
+
+    REQUIRE(state.r[0] == 0x5A82u);
+    REQUIRE(state.current_mode() == Mode::User);
+    REQUIRE(state.cpsr == pre_cpsr);
+    REQUIRE(state.pc == kArmBase + 4u);
+}
+
+// ARM-state SWI 0x01 — invalid, hits the `default` warn path.
 static void arm_swi_0x01_invalid_default() {
     NDS nds;
     auto& state = nds.cpu7().state();
@@ -255,7 +272,7 @@ static void arm_swi_0x01_invalid_default() {
     REQUIRE(state.pc == kArmBase + 4u);
 }
 
-// Case 10: ARM-state SWI 0x02 — invalid, hits the `default` warn path.
+// ARM-state SWI 0x02 — invalid, hits the `default` warn path.
 static void arm_swi_0x02_invalid_default() {
     NDS nds;
     auto& state = nds.cpu7().state();
@@ -268,7 +285,7 @@ static void arm_swi_0x02_invalid_default() {
     REQUIRE(state.pc == kArmBase + 4u);
 }
 
-// Case 11: Thumb-state SWI 0x0A — invalid, hits the `default` warn path.
+// Thumb-state SWI 0x0A — invalid, hits the `default` warn path.
 static void thumb_swi_0x0a_invalid_default() {
     NDS nds;
     auto& state = nds.cpu7().state();
@@ -286,7 +303,7 @@ static void thumb_swi_0x0a_invalid_default() {
     REQUIRE(state.pc == kThumbBase + 2u);
 }
 
-// Case 12: stubs don't touch user-visible general-purpose registers R0–R12.
+// Stubs don't touch user-visible general-purpose registers R0–R12.
 // Seed distinct sentinels before the SWI, assert they survive the round
 // trip. SWI 0x01 is chosen (hits default — representative of every stub).
 //
@@ -309,7 +326,7 @@ static void swi_stubs_preserve_r0_through_r12() {
     }
 }
 
-// Case 13: SWI from System mode (no SPSR_sys — SPSR_svc is used because SWI
+// SWI from System mode (no SPSR_sys — SPSR_svc is used because SWI
 // entry swaps into SVC). The restore path must walk through SPSR_svc, so
 // the caller mode round-trips correctly even when it is not User.
 static void arm_swi_from_system_mode_returns_to_system() {
@@ -333,11 +350,12 @@ int main() {
     arm_swi_0x13_huff_callback_real();
     arm_swi_0x14_rl_wram_scaffold();
     arm_swi_0x15_rl_callback_real();
+    arm_swi_0x1a_get_sine_table();
     arm_swi_0x01_invalid_default();
     arm_swi_0x02_invalid_default();
     thumb_swi_0x0a_invalid_default();
     swi_stubs_preserve_r0_through_r12();
     arm_swi_from_system_mode_returns_to_system();
-    std::puts("arm7_bios_dispatch_test: all 13 cases passed");
+    std::puts("arm7_bios_dispatch_test: all 14 cases passed");
     return 0;
 }

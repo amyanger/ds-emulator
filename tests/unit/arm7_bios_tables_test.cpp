@@ -155,6 +155,41 @@ static void sine_table_is_monotonic_non_decreasing() {
     }
 }
 
+// SWI 0x1A handler: routes through to the lookup, returns 1 cycle, and
+// clamps any out-of-range R0 (logging a one-shot warn the test does not
+// assert on).
+static void get_sine_table_handler_routes_to_lookup() {
+    NDS nds;
+    auto& state = nds.cpu7().state();
+    state.r[0] = 32u;
+    bios7_get_sine_table(state, nds.arm7_bus());
+    REQUIRE(state.r[0] == 0x5A82u);
+}
+
+static void get_sine_table_handler_returns_one_cycle() {
+    NDS nds;
+    auto& state = nds.cpu7().state();
+    state.r[0] = 0u;
+    const u32 cycles = bios7_get_sine_table(state, nds.arm7_bus());
+    REQUIRE(cycles == 1u);
+}
+
+static void get_sine_table_handler_clamps_one_past_end() {
+    NDS nds;
+    auto& state = nds.cpu7().state();
+    state.r[0] = 0x40u;
+    bios7_get_sine_table(state, nds.arm7_bus());
+    REQUIRE(state.r[0] == sine_table_lookup(0x3Fu));
+}
+
+static void get_sine_table_handler_clamps_max_u32() {
+    NDS nds;
+    auto& state = nds.cpu7().state();
+    state.r[0] = 0xFFFFFFFFu;
+    bios7_get_sine_table(state, nds.arm7_bus());
+    REQUIRE(state.r[0] == sine_table_lookup(0x3Fu));
+}
+
 int main() {
     soundbias_reset_value_is_0x0200();
     soundbias_write32_stores_low_10_bits();
@@ -170,6 +205,10 @@ int main() {
     sine_table_index_sixty_three_matches_formula();
     sine_table_full_table_matches_formula();
     sine_table_is_monotonic_non_decreasing();
-    std::puts("arm7_bios_tables_test: all 14 cases passed");
+    get_sine_table_handler_routes_to_lookup();
+    get_sine_table_handler_returns_one_cycle();
+    get_sine_table_handler_clamps_one_past_end();
+    get_sine_table_handler_clamps_max_u32();
+    std::puts("arm7_bios_tables_test: all 18 cases passed");
     return 0;
 }

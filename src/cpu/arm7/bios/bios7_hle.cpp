@@ -77,6 +77,9 @@ u32 arm7_bios_hle_dispatch_swi(Arm7& cpu, u32 swi_number) {
     case 0x15:
         cycles = bios7_rl_uncomp_vram(cpu);
         break;
+    case 0x1A:
+        cycles = bios7_get_sine_table(state, bus);
+        break;
     case 0x1D:
         cycles = bios7_get_boot_procs(state, bus);
         break;
