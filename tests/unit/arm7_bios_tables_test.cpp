@@ -7,7 +7,9 @@
 #include "nds.hpp"
 #include "require.hpp"
 
+#include <cmath>
 #include <cstdio>
+#include <numbers>
 
 using namespace ds;
 
@@ -119,6 +121,40 @@ static void get_boot_procs_returns_zeros_in_r0_r1_r3() {
     REQUIRE(state.r[3] == 0u);
 }
 
+// SWI 0x1A SineTable lookup (handler wire-up lands in commit 2).
+
+static u16 sine_formula(u32 i) {
+    const double angle = (static_cast<double>(i) * std::numbers::pi) / 128.0;
+    return static_cast<u16>(std::lround(std::sin(angle) * 32768.0));
+}
+
+static void sine_table_index_zero_returns_zero() {
+    REQUIRE(sine_table_lookup(0) == 0u);
+}
+
+static void sine_table_index_thirty_two_is_quarter_pi() {
+    REQUIRE(sine_table_lookup(32) == sine_formula(32));
+    REQUIRE(sine_table_lookup(32) == 0x5A82u);
+}
+
+// GBATEK documents the table max as 0x7FF5; this test only locks formula
+// equivalence, not GBATEK's exact byte.
+static void sine_table_index_sixty_three_matches_formula() {
+    REQUIRE(sine_table_lookup(63) == sine_formula(63));
+}
+
+static void sine_table_full_table_matches_formula() {
+    for (u32 i = 0; i < kSineTableSize; ++i) {
+        REQUIRE(sine_table_lookup(i) == sine_formula(i));
+    }
+}
+
+static void sine_table_is_monotonic_non_decreasing() {
+    for (u32 i = 1; i < kSineTableSize; ++i) {
+        REQUIRE(sine_table_lookup(i) >= sine_table_lookup(i - 1));
+    }
+}
+
 int main() {
     soundbias_reset_value_is_0x0200();
     soundbias_write32_stores_low_10_bits();
@@ -129,6 +165,11 @@ int main() {
     sound_bias_swi_r0_nonzero_writes_0x200();
     is_debugger_returns_zero();
     get_boot_procs_returns_zeros_in_r0_r1_r3();
-    std::puts("arm7_bios_tables_test: all 9 cases passed");
+    sine_table_index_zero_returns_zero();
+    sine_table_index_thirty_two_is_quarter_pi();
+    sine_table_index_sixty_three_matches_formula();
+    sine_table_full_table_matches_formula();
+    sine_table_is_monotonic_non_decreasing();
+    std::puts("arm7_bios_tables_test: all 14 cases passed");
     return 0;
 }
