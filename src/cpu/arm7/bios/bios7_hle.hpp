@@ -15,9 +15,12 @@
 //     becomes the new PC. Without this, the CPU would stick at the SWI vector
 //     (PC=0x08) forever since there is no real BIOS ROM to execute.
 //
-// Commit 4 implements ONLY warn-stubs for SoftReset (0x00), the decompressor
-// family (0x10–0x15), and an "invalid / not yet implemented" default. Real
-// per-family bodies land in commits 5–11.
+// Slice 3e wired in real handlers for every Pokemon-relevant SWI EXCEPT the
+// six-entry decompressor family (0x10–0x15). Slice 3f commit 1 splits that
+// family into six per-SWI dispatch entries: 0x10/0x11/0x14 route to scaffold
+// stubs that commits 2/3/4 replace with real algorithms, while 0x12/0x13/0x15
+// route to per-SWI callback warn-stubs deferred to slice 3g. SoftReset (0x00)
+// and the catch-all default for invalid SWIs remain warn-stubs.
 
 #include "ds/common.hpp"
 

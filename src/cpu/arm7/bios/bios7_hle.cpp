@@ -2,6 +2,7 @@
 
 #include "bus/arm7_bus.hpp"
 #include "cpu/arm7/arm7_state.hpp"
+#include "cpu/arm7/bios/bios7_decomp.hpp"
 #include "cpu/arm7/bios/bios7_halt.hpp"
 #include "cpu/arm7/bios/bios7_math.hpp"
 #include "cpu/arm7/bios/bios7_memcpy.hpp"
@@ -55,13 +56,22 @@ u32 arm7_bios_hle_dispatch_swi(Arm7State& state, Arm7Bus& bus, u32 swi_number) {
         cycles = bios7_is_debugger(state, bus);
         break;
     case 0x10:
+        cycles = bios7_bit_unpack(state, bus);
+        break;
     case 0x11:
+        cycles = bios7_lz77_uncomp_wram(state, bus);
+        break;
     case 0x12:
+        cycles = bios7_lz77_callback_stub(state, bus);
+        break;
     case 0x13:
+        cycles = bios7_huff_callback_stub(state, bus);
+        break;
     case 0x14:
+        cycles = bios7_rl_uncomp_wram(state, bus);
+        break;
     case 0x15:
-        DS_LOG_WARN("arm7/bios: decompressor SWI 0x%02X not implemented (slice 3f)",
-                    swi_number & 0xFFu);
+        cycles = bios7_rl_callback_stub(state, bus);
         break;
     case 0x1D:
         cycles = bios7_get_boot_procs(state, bus);
