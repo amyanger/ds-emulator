@@ -1,6 +1,7 @@
 #include "cpu/arm7/bios/bios7_hle.hpp"
 
 #include "bus/arm7_bus.hpp"
+#include "cpu/arm7/arm7.hpp"
 #include "cpu/arm7/arm7_state.hpp"
 #include "cpu/arm7/bios/bios7_decomp.hpp"
 #include "cpu/arm7/bios/bios7_halt.hpp"
@@ -10,7 +11,10 @@
 
 namespace ds {
 
-u32 arm7_bios_hle_dispatch_swi(Arm7State& state, Arm7Bus& bus, u32 swi_number) {
+u32 arm7_bios_hle_dispatch_swi(Arm7& cpu, u32 swi_number) {
+    Arm7State& state = cpu.state();
+    Arm7Bus& bus = cpu.bus();
+
     // DS SWIs use only the low 8 bits of the comment field.
     u32 cycles = 1;
     switch (swi_number & 0xFFu) {

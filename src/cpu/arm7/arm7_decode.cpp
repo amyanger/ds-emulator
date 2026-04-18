@@ -25,16 +25,16 @@ namespace {
 // coproc encoding is legitimately undefined and must trap to the UND vector.
 // SWI (bits[27:24] == 0b1111) enters Supervisor mode with return_addr =
 // instr_addr + 4, then hands off to the BIOS-HLE dispatcher.
-u32 dispatch_coproc_or_swi(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
-    const u32 bits_27_24 = (instr >> 24) & 0xFu;
-    if (bits_27_24 == 0xFu) {
+u32 dispatch_coproc_or_swi(Arm7& cpu, u32 instr, u32 instr_addr) {
+    Arm7State& state = cpu.state();
+    if (((instr >> 24) & 0xFu) == 0xFu) {
         // ARM-state SWI: bits[23:0] = comment field / SWI number. Entry is a
         // fixed 3 cycles (matches enter_exception's coarse model); the HLE
         // stub returns 0 today, so we hard-code 3 rather than summing the
         // two return values to keep the cost contract explicit.
         const u32 swi_number = instr & 0x00FFFFFFu;
         enter_exception(state, ExceptionKind::Swi, instr_addr + 4);
-        arm7_bios_hle_dispatch_swi(state, bus, swi_number);
+        arm7_bios_hle_dispatch_swi(cpu, swi_number);
         return 3;
     }
     // Coprocessor instructions (CDP / MRC / MCR / LDC / STC): enter UND mode
@@ -43,7 +43,9 @@ u32 dispatch_coproc_or_swi(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_
     return enter_exception(state, ExceptionKind::Undef, instr_addr + 4);
 }
 
-u32 dispatch_arm(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
+u32 dispatch_arm(Arm7& cpu, u32 instr, u32 instr_addr) {
+    Arm7State& state = cpu.state();
+    Arm7Bus& bus = cpu.bus();
     const u32 cond = instr >> 28;
     if (!eval_condition(cond, state.cpsr)) {
         return 1; // condition-skipped instructions still consume 1 cycle
@@ -64,7 +66,7 @@ u32 dispatch_arm(Arm7State& state, Arm7Bus& bus, u32 instr, u32 instr_addr) {
         return dispatch_branch(state, instr);
     case 0b110:
     case 0b111:
-        return dispatch_coproc_or_swi(state, bus, instr, instr_addr);
+        return dispatch_coproc_or_swi(cpu, instr, instr_addr);
     default:
         return 1; // unreachable
     }
@@ -85,7 +87,7 @@ void Arm7::step_arm() {
     state_.r[15] = instr_addr + 8;
     state_.pc = instr_addr + 4;
 
-    const u32 cycles_consumed = dispatch_arm(state_, *bus_, instr, instr_addr);
+    const u32 cycles_consumed = dispatch_arm(*this, instr, instr_addr);
     assert(cycles_consumed > 0 && "Arm7::step_arm: dispatch must consume >= 1 cycle");
     state_.cycles += cycles_consumed;
 }

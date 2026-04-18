@@ -17,6 +17,7 @@
 // halfword-aligned Thumb target.
 
 #include "bus/arm7_bus.hpp"
+#include "cpu/arm7/arm7.hpp"
 #include "cpu/arm7/arm7_alu.hpp"
 #include "cpu/arm7/arm7_exception.hpp"
 #include "cpu/arm7/arm7_state.hpp"
@@ -26,12 +27,9 @@
 
 namespace ds {
 
-u32 dispatch_thumb_bcond_swi(Arm7State& state,
-                             Arm7Bus& bus,
-                             u16 instr,
-                             u32 instr_addr,
-                             u32 /*pc_read*/,
-                             u32 /*pc_literal*/) {
+u32 dispatch_thumb_bcond_swi(
+    Arm7& cpu, u16 instr, u32 instr_addr, u32 /*pc_read*/, u32 /*pc_literal*/) {
+    Arm7State& state = cpu.state();
     const u32 cond = (instr >> 8) & 0xFu;
     const u32 imm8 = instr & 0xFFu;
 
@@ -39,10 +37,9 @@ u32 dispatch_thumb_bcond_swi(Arm7State& state,
         // THUMB.17 SWI — enter Supervisor mode with return_addr = instr_addr + 2
         // (post-faulting-instruction address for a 16-bit Thumb SWI, per
         // GBATEK and spec §5.3), then hand off to the BIOS-HLE dispatcher.
-        // The HLE layer is a warn-only stub in slice 3d; real bodies land
-        // in a later slice. SWI number is imm8.
+        // SWI number is imm8.
         enter_exception(state, ExceptionKind::Swi, instr_addr + 2);
-        arm7_bios_hle_dispatch_swi(state, bus, imm8);
+        arm7_bios_hle_dispatch_swi(cpu, imm8);
         return 3;
     }
     if (cond == 0xEu) {

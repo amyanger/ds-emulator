@@ -7,13 +7,19 @@
 
 namespace ds {
 
+class Arm7;
 struct Arm7State;
 class Arm7Bus;
 
 // Top-level Thumb instruction fan-out. Dispatches on bits[15:13] of
 // `instr` into one of eight bucket handlers. Returns ARM7 cycles
 // consumed (1 per instruction in slice 3c — coarse cost model).
-u32 dispatch_thumb(Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr);
+//
+// Takes `Arm7& cpu` because the SWI sub-path (THUMB.17 inside
+// dispatch_thumb_110_space → dispatch_thumb_bcond_swi) reaches the BIOS
+// HLE dispatcher, which invokes guest callbacks via the interpreter.
+// Bucket handlers that don't touch the SWI path keep `(state, bus, ...)`.
+u32 dispatch_thumb(Arm7& cpu, u16 instr, u32 instr_addr);
 
 // --- Per-family Thumb dispatchers (called from dispatch_thumb) ----
 // Each receives two pre-materialized PC values:
@@ -97,15 +103,16 @@ u32 dispatch_thumb_100_space(
     Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
 u32 dispatch_thumb_101_space(
     Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
-u32 dispatch_thumb_110_space(
-    Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
+// THUMB.15 LDMIA/STMIA (cond 0xC) + THUMB.16/.17 Bcond/SWI (cond 0xD).
+// Takes `Arm7&` because the SWI leaf reaches the BIOS dispatcher.
+u32 dispatch_thumb_110_space(Arm7& cpu, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
 u32 dispatch_thumb_111_space(
     Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
 
-// THUMB.16 Bcond + THUMB.17 SWI warn stub (both live in the 1101xxxx space).
+// THUMB.16 Bcond + THUMB.17 SWI (both live in the 1101xxxx space). Takes
+// `Arm7&` so the SWI leaf can reach the BIOS HLE dispatcher.
 // Defined in arm7_thumb_branch.cpp.
-u32 dispatch_thumb_bcond_swi(
-    Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
+u32 dispatch_thumb_bcond_swi(Arm7& cpu, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal);
 
 // THUMB.18 B unconditional (11100 imm11).
 // Defined in arm7_thumb_branch.cpp.

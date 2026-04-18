@@ -57,6 +57,21 @@ void Arm7::run_until(Cycle arm9_target) {
     }
 }
 
+void Arm7::step_one_instruction() {
+    // Sample the IRQ line at the instruction boundary, mirroring run_until.
+    // An IRQ taken here consumes the step; the handler's first instruction
+    // runs on the next call.
+    if (irq_line_ && !(state_.cpsr & (1u << 7))) {
+        arm7_enter_irq(state_, *bus_);
+        return;
+    }
+    if (state_.cpsr & (1u << 5)) {
+        step_thumb();
+    } else {
+        step_arm();
+    }
+}
+
 void Arm7::raise_prefetch_abort(u32 instr_addr) {
     // ARMv4 spec: R14_abt = instr_addr + 4, vector 0x0C, mode Abort, I=1.
     // Handler returns via SUBS PC, R14, #4 to re-execute the faulting fetch.

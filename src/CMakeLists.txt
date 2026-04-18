@@ -19,6 +19,7 @@ add_library(ds_core STATIC
     cpu/arm7/arm7_swap.cpp
     cpu/arm7/arm7_exception.cpp
     cpu/arm7/bios/bios7_hle.cpp
+    cpu/arm7/bios/bios7_trampoline.cpp
     cpu/arm7/bios/bios7_decomp.cpp
     cpu/arm7/bios/bios7_halt.cpp
     cpu/arm7/bios/bios7_math.cpp

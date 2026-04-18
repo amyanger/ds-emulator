@@ -26,14 +26,18 @@
 
 namespace ds {
 
-struct Arm7State;
-class Arm7Bus;
+class Arm7;
 
 // Dispatch the SWI identified by `swi_number` (low 8 bits are meaningful for
 // every DS SWI; higher bits are ignored by real BIOS). Returns the cycle
 // count consumed by the SWI body (the 3-cycle entry cost is charged by the
 // caller in `dispatch_swi_coproc`). After the body runs, the dispatcher
 // implicitly executes `MOVS PC, R14` to return to the caller.
-u32 arm7_bios_hle_dispatch_swi(Arm7State& state, Arm7Bus& bus, u32 swi_number);
+//
+// Takes `Arm7&` so SWI handlers that need to invoke guest callbacks can
+// step the interpreter via the trampoline. Per-handler signatures stay
+// `(Arm7State&, Arm7Bus&)` — the dispatcher unpacks `cpu.state()` /
+// `cpu.bus()` at each switch arm.
+u32 arm7_bios_hle_dispatch_swi(Arm7& cpu, u32 swi_number);
 
 } // namespace ds

@@ -46,9 +46,22 @@ public:
     // directly. R14_fiq = state.pc + 4 (ARM-style post-advance).
     void raise_fiq();
 
-    // Test access.
+    // Internal-state accessors used by decoders (arm7_decode.cpp,
+    // arm7_thumb_decode.cpp), the BIOS HLE dispatcher, and unit tests.
     Arm7State& state() { return state_; }
     const Arm7State& state() const { return state_; }
+    Arm7Bus& bus() { return *bus_; }
+
+    // Execute exactly one instruction at the current PC, selecting ARM or
+    // Thumb by CPSR.T, after sampling the IRQ line at the instruction
+    // boundary. Mirrors a single iteration of run_until's inner loop but
+    // takes no cycle target — used by the BIOS-HLE trampoline, which steps
+    // until a sentinel PC value is reached.
+    //
+    // Halt state is NOT honoured here — the trampoline must run the guest
+    // callback regardless, and real BIOS callbacks never execute while the
+    // CPU is halted anyway (halt clears on the IRQ that woke it).
+    void step_one_instruction();
 
 private:
     // Fetch one ARM instruction at pc_, advance pc_, set R15 to pc_+4

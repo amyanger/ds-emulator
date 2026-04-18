@@ -94,7 +94,7 @@ static void lz77_end_to_end_dshgss_x8() {
     state.r[0] = kSrc;
     state.r[1] = kDst;
 
-    arm7_bios_hle_dispatch_swi(state, bus, 0x11u);
+    arm7_bios_hle_dispatch_swi(nds.cpu7(), 0x11u);
 
     for (u32 i = 0; i < expected.size(); ++i) {
         REQUIRE(bus.read8(kDst + i) == expected[i]);
@@ -135,7 +135,7 @@ static void rle_end_to_end_mixed_32() {
     state.r[0] = kSrc;
     state.r[1] = kDst;
 
-    arm7_bios_hle_dispatch_swi(state, bus, 0x14u);
+    arm7_bios_hle_dispatch_swi(nds.cpu7(), 0x14u);
 
     for (u32 i = 0; i < expected.size(); ++i) {
         REQUIRE(bus.read8(kDst + i) == expected[i]);
@@ -166,7 +166,7 @@ static void bitunpack_end_to_end_1to8_offset_0x80() {
     state.r[1] = kDst;
     state.r[2] = kInfo;
 
-    arm7_bios_hle_dispatch_swi(state, bus, 0x10u);
+    arm7_bios_hle_dispatch_swi(nds.cpu7(), 0x10u);
 
     // clang-format off
     constexpr std::array<u8, 32> expected = {

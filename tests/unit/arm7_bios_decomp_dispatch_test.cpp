@@ -57,7 +57,7 @@ static void dispatch_0x10_bit_unpack() {
     state.r[1] = kDst;
     state.r[2] = kInfo;
 
-    arm7_bios_hle_dispatch_swi(state, bus, 0x10u);
+    arm7_bios_hle_dispatch_swi(nds.cpu7(), 0x10u);
 
     REQUIRE(bus.read32(kDst + 0u) == 0x0001'0001u);
     REQUIRE(bus.read32(kDst + 4u) == 0x0000'0000u);
@@ -80,7 +80,7 @@ static void dispatch_0x11_lz77_wram() {
     state.r[0] = kSrc;
     state.r[1] = kDst;
 
-    arm7_bios_hle_dispatch_swi(state, bus, 0x11u);
+    arm7_bios_hle_dispatch_swi(nds.cpu7(), 0x11u);
 
     REQUIRE(bus.read8(kDst + 0u) == 0xABu);
     REQUIRE(bus.read8(kDst + 1u) == 0x5Au);
@@ -103,7 +103,7 @@ static void dispatch_0x14_rl_wram() {
     state.r[0] = kSrc;
     state.r[1] = kDst;
 
-    arm7_bios_hle_dispatch_swi(state, bus, 0x14u);
+    arm7_bios_hle_dispatch_swi(nds.cpu7(), 0x14u);
 
     REQUIRE(bus.read8(kDst + 0u) == 0xCDu);
     REQUIRE(bus.read8(kDst + 1u) == 0xCDu);
@@ -116,12 +116,11 @@ constexpr u32 kSentinelR0 = 0xDEAD'BEEFu;
 static void dispatch_0x12_lz77_callback_stub() {
     NDS nds;
     auto& state = nds.cpu7().state();
-    auto& bus = nds.arm7_bus();
 
     enter_arm_swi_state(nds, kSwiPc);
     state.r[0] = kSentinelR0;
 
-    arm7_bios_hle_dispatch_swi(state, bus, 0x12u);
+    arm7_bios_hle_dispatch_swi(nds.cpu7(), 0x12u);
 
     REQUIRE(state.r[0] == kSentinelR0);
 }
@@ -129,12 +128,11 @@ static void dispatch_0x12_lz77_callback_stub() {
 static void dispatch_0x13_huff_callback_stub() {
     NDS nds;
     auto& state = nds.cpu7().state();
-    auto& bus = nds.arm7_bus();
 
     enter_arm_swi_state(nds, kSwiPc);
     state.r[0] = kSentinelR0;
 
-    arm7_bios_hle_dispatch_swi(state, bus, 0x13u);
+    arm7_bios_hle_dispatch_swi(nds.cpu7(), 0x13u);
 
     REQUIRE(state.r[0] == kSentinelR0);
 }
@@ -142,12 +140,11 @@ static void dispatch_0x13_huff_callback_stub() {
 static void dispatch_0x15_rl_callback_stub() {
     NDS nds;
     auto& state = nds.cpu7().state();
-    auto& bus = nds.arm7_bus();
 
     enter_arm_swi_state(nds, kSwiPc);
     state.r[0] = kSentinelR0;
 
-    arm7_bios_hle_dispatch_swi(state, bus, 0x15u);
+    arm7_bios_hle_dispatch_swi(nds.cpu7(), 0x15u);
 
     REQUIRE(state.r[0] == kSentinelR0);
 }

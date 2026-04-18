@@ -88,15 +88,15 @@ u32 dispatch_thumb_101_space(
     return 1;
 }
 
-u32 dispatch_thumb_110_space(
-    Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal) {
+u32 dispatch_thumb_110_space(Arm7& cpu, u16 instr, u32 instr_addr, u32 pc_read, u32 pc_literal) {
     // bits[15:13] == 110. Two sub-families:
     //   THUMB.15 LDMIA/STMIA:     1100 L Rb Rlist   (top nibble 0xC)
     //   THUMB.16 Bcond / .17 SWI: 1101 ...          (cond 0xF → SWI)
     if ((instr >> 12) == 0xCu) {
-        return dispatch_thumb_ldmia_stmia(state, bus, instr, instr_addr, pc_read, pc_literal);
+        return dispatch_thumb_ldmia_stmia(
+            cpu.state(), cpu.bus(), instr, instr_addr, pc_read, pc_literal);
     }
-    return dispatch_thumb_bcond_swi(state, bus, instr, instr_addr, pc_read, pc_literal);
+    return dispatch_thumb_bcond_swi(cpu, instr, instr_addr, pc_read, pc_literal);
 }
 
 u32 dispatch_thumb_111_space(
@@ -119,7 +119,9 @@ u32 dispatch_thumb_111_space(
     return 1; // unreachable — form is a 2-bit value
 }
 
-u32 dispatch_thumb(Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr) {
+u32 dispatch_thumb(Arm7& cpu, u16 instr, u32 instr_addr) {
+    Arm7State& state = cpu.state();
+    Arm7Bus& bus = cpu.bus();
     // Thumb PC during execute = instr_addr + 4 (2-stage prefetch).
     // step_thumb already sets state.r[15] = instr_addr + 4 before calling
     // us, so state.r[15] == pc_read at this point. We materialize both
@@ -145,7 +147,7 @@ u32 dispatch_thumb(Arm7State& state, Arm7Bus& bus, u16 instr, u32 instr_addr) {
     case 0b101:
         return dispatch_thumb_101_space(state, bus, instr, instr_addr, pc_read, pc_literal);
     case 0b110:
-        return dispatch_thumb_110_space(state, bus, instr, instr_addr, pc_read, pc_literal);
+        return dispatch_thumb_110_space(cpu, instr, instr_addr, pc_read, pc_literal);
     case 0b111:
         return dispatch_thumb_111_space(state, bus, instr, instr_addr, pc_read, pc_literal);
     default:
@@ -170,7 +172,7 @@ void Arm7::step_thumb() {
     state_.r[15] = instr_addr + 4;
     state_.pc = instr_addr + 2;
 
-    const u32 cycles_consumed = dispatch_thumb(state_, *bus_, instr, instr_addr);
+    const u32 cycles_consumed = dispatch_thumb(*this, instr, instr_addr);
     assert(cycles_consumed > 0 && "Arm7::step_thumb: dispatch must consume >= 1 cycle");
     state_.cycles += cycles_consumed;
 }
