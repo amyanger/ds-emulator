@@ -108,8 +108,40 @@ u32 bios7_lz77_uncomp_wram(Arm7State& state, Arm7Bus& bus) {
     return 1;
 }
 
-u32 bios7_rl_uncomp_wram(Arm7State& /*state*/, Arm7Bus& /*bus*/) {
-    DS_LOG_WARN("arm7/bios: SWI 0x14 RLUnComp(Wram) not yet implemented (slice 3f scaffold)");
+u32 bios7_rl_uncomp_wram(Arm7State& state, Arm7Bus& bus) {
+    const u32 src = state.r[0];
+    const u32 dest = state.r[1];
+
+    const auto hdr = bios7_decomp_parse_header(bus, src);
+    if (hdr.type != 3u) {
+        DS_LOG_WARN("arm7/bios: RLE SWI 0x14 with header type %u (expected 3)", hdr.type);
+    }
+
+    u32 src_addr = src + 4u;
+    u32 dest_addr = dest;
+    u32 written = 0u;
+
+    // Truncate at hdr.size; real BIOS does the same when the last block overshoots.
+    while (written < hdr.size) {
+        const u8 flag = bus.read8(src_addr++);
+        const bool compressed = (flag & 0x80u) != 0u;
+        const u32 length_field = flag & 0x7Fu;
+        const u32 len = length_field + (compressed ? 3u : 1u);
+
+        if (compressed) {
+            const u8 byte = bus.read8(src_addr++);
+            for (u32 i = 0; i < len && written < hdr.size; ++i) {
+                bus.write8(dest_addr++, byte);
+                ++written;
+            }
+        } else {
+            for (u32 i = 0; i < len && written < hdr.size; ++i) {
+                const u8 byte = bus.read8(src_addr++);
+                bus.write8(dest_addr++, byte);
+                ++written;
+            }
+        }
+    }
     return 1;
 }
 
