@@ -21,4 +21,9 @@ inline constexpr u32 kSineTableSize = 0x40;
 u16 sine_table_lookup(u32 index);
 u32 bios7_get_sine_table(Arm7State& state, Arm7Bus& bus);
 
+// SWI 0x1B — GetPitchTable.
+inline constexpr u32 kPitchTableSize = 0x300;
+u16 pitch_table_lookup(u32 index);
+u32 bios7_get_pitch_table(Arm7State& state, Arm7Bus& bus);
+
 } // namespace ds

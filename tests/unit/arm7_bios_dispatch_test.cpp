@@ -17,6 +17,7 @@
 #include "bus/arm7_bus.hpp"
 #include "cpu/arm7/arm7.hpp"
 #include "cpu/arm7/arm7_state.hpp"
+#include "cpu/arm7/bios/bios7_tables.hpp"
 #include "nds.hpp"
 #include "require.hpp"
 
@@ -259,6 +260,24 @@ static void arm_swi_0x1a_get_sine_table() {
     REQUIRE(state.pc == kArmBase + 4u);
 }
 
+// ARM-state SWI 0x1B — GetPitchTable. Dispatcher routes to the real
+// handler (slice 3h commit 3). R0 = 64 → pitch_table_lookup(64) proves the
+// case row landed on bios7_get_pitch_table; the dispatcher's MOVS PC, R14
+// tail still applies.
+static void arm_swi_0x1b_get_pitch_table() {
+    NDS nds;
+    auto& state = nds.cpu7().state();
+
+    const u32 pre_cpsr = seed_arm_caller(nds, Mode::User);
+    state.r[0] = 64u;
+    run_one_arm_swi(nds, kArmBase, 0xEF00001Bu); // SWI #0x1B
+
+    REQUIRE(state.r[0] == pitch_table_lookup(64));
+    REQUIRE(state.current_mode() == Mode::User);
+    REQUIRE(state.cpsr == pre_cpsr);
+    REQUIRE(state.pc == kArmBase + 4u);
+}
+
 // ARM-state SWI 0x01 — invalid, hits the `default` warn path.
 static void arm_swi_0x01_invalid_default() {
     NDS nds;
@@ -351,11 +370,12 @@ int main() {
     arm_swi_0x14_rl_wram_scaffold();
     arm_swi_0x15_rl_callback_real();
     arm_swi_0x1a_get_sine_table();
+    arm_swi_0x1b_get_pitch_table();
     arm_swi_0x01_invalid_default();
     arm_swi_0x02_invalid_default();
     thumb_swi_0x0a_invalid_default();
     swi_stubs_preserve_r0_through_r12();
     arm_swi_from_system_mode_returns_to_system();
-    std::puts("arm7_bios_dispatch_test: all 14 cases passed");
+    std::puts("arm7_bios_dispatch_test: all 15 cases passed");
     return 0;
 }

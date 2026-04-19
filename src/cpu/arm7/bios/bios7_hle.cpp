@@ -80,6 +80,9 @@ u32 arm7_bios_hle_dispatch_swi(Arm7& cpu, u32 swi_number) {
     case 0x1A:
         cycles = bios7_get_sine_table(state, bus);
         break;
+    case 0x1B:
+        cycles = bios7_get_pitch_table(state, bus);
+        break;
     case 0x1D:
         cycles = bios7_get_boot_procs(state, bus);
         break;

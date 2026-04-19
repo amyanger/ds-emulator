@@ -190,6 +190,83 @@ static void get_sine_table_handler_clamps_max_u32() {
     REQUIRE(state.r[0] == sine_table_lookup(0x3Fu));
 }
 
+// SWI 0x1B PitchTable lookup + handler (slice 3h commit 3).
+//
+// Table correctness is verified against the formula recomputed in the test
+// rather than against an external reference — the spec ships the formula
+// values (§4.6, §5.3), and a 0x20 delta versus the GBATEK-documented max is
+// expected at the top of the table.
+
+static u16 pitch_formula(u32 i) {
+    const double size = static_cast<double>(kPitchTableSize);
+    const double ratio = std::pow(2.0, static_cast<double>(i) / size);
+    return static_cast<u16>(std::lround((ratio - 1.0) * 65536.0));
+}
+
+static void pitch_table_index_zero_returns_zero() {
+    REQUIRE(pitch_table_lookup(0) == 0u);
+}
+
+// Index 64 is the one-semitone ratio (64/768 = 1/12). Anchor to a hand-worked
+// landmark so a formula transcription that also slipped into pitch_formula
+// cannot hide behind self-agreement. Value: round(65536 · (2^(1/12) − 1))
+// = round(3897.47) = 3897 = 0x0F39. (Spec §5.3 rounds 0.0594631 · 65536 to
+// 3898 = 0x0F3A; the exact double arithmetic lands one LSB lower.)
+static void pitch_table_index_sixty_four_one_semitone() {
+    REQUIRE(pitch_table_lookup(64) == pitch_formula(64));
+    REQUIRE(pitch_table_lookup(64) == 0x0F39u);
+}
+
+static void pitch_table_index_max_matches_formula() {
+    REQUIRE(pitch_table_lookup(767) == pitch_formula(767));
+}
+
+// Load-bearing test: locks the production table to the formula the spec
+// specifies, byte for byte.
+static void pitch_table_full_table_matches_formula() {
+    for (u32 i = 0; i < kPitchTableSize; ++i) {
+        REQUIRE(pitch_table_lookup(i) == pitch_formula(i));
+    }
+}
+
+static void pitch_table_is_monotonic_non_decreasing() {
+    for (u32 i = 1; i < kPitchTableSize; ++i) {
+        REQUIRE(pitch_table_lookup(i) >= pitch_table_lookup(i - 1));
+    }
+}
+
+static void get_pitch_table_handler_routes_to_lookup() {
+    NDS nds;
+    auto& state = nds.cpu7().state();
+    state.r[0] = 64u;
+    bios7_get_pitch_table(state, nds.arm7_bus());
+    REQUIRE(state.r[0] == pitch_formula(64));
+}
+
+static void get_pitch_table_handler_returns_one_cycle() {
+    NDS nds;
+    auto& state = nds.cpu7().state();
+    state.r[0] = 0u;
+    const u32 cycles = bios7_get_pitch_table(state, nds.arm7_bus());
+    REQUIRE(cycles == 1u);
+}
+
+static void get_pitch_table_handler_clamps_one_past_end() {
+    NDS nds;
+    auto& state = nds.cpu7().state();
+    state.r[0] = 0x300u;
+    bios7_get_pitch_table(state, nds.arm7_bus());
+    REQUIRE(state.r[0] == pitch_table_lookup(0x2FFu));
+}
+
+static void get_pitch_table_handler_clamps_max_u32() {
+    NDS nds;
+    auto& state = nds.cpu7().state();
+    state.r[0] = 0xFFFFFFFFu;
+    bios7_get_pitch_table(state, nds.arm7_bus());
+    REQUIRE(state.r[0] == pitch_table_lookup(0x2FFu));
+}
+
 int main() {
     soundbias_reset_value_is_0x0200();
     soundbias_write32_stores_low_10_bits();
@@ -209,6 +286,15 @@ int main() {
     get_sine_table_handler_returns_one_cycle();
     get_sine_table_handler_clamps_one_past_end();
     get_sine_table_handler_clamps_max_u32();
-    std::puts("arm7_bios_tables_test: all 18 cases passed");
+    pitch_table_index_zero_returns_zero();
+    pitch_table_index_sixty_four_one_semitone();
+    pitch_table_index_max_matches_formula();
+    pitch_table_full_table_matches_formula();
+    pitch_table_is_monotonic_non_decreasing();
+    get_pitch_table_handler_routes_to_lookup();
+    get_pitch_table_handler_returns_one_cycle();
+    get_pitch_table_handler_clamps_one_past_end();
+    get_pitch_table_handler_clamps_max_u32();
+    std::puts("arm7_bios_tables_test: all 27 cases passed");
     return 0;
 }
