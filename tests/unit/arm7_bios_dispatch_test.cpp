@@ -278,6 +278,24 @@ static void arm_swi_0x1b_get_pitch_table() {
     REQUIRE(state.pc == kArmBase + 4u);
 }
 
+// ARM-state SWI 0x1C — GetVolumeTable. Dispatcher routes to the real
+// handler (slice 3h commit 4). R0 = 0xBD lands on the segment-1 restart,
+// so a mis-routed handler or a wrong curve that smoothed through the
+// boundary would fail here.
+static void arm_swi_0x1c_get_volume_table() {
+    NDS nds;
+    auto& state = nds.cpu7().state();
+
+    const u32 pre_cpsr = seed_arm_caller(nds, Mode::User);
+    state.r[0] = 0xBDu;
+    run_one_arm_swi(nds, kArmBase, 0xEF00001Cu); // SWI #0x1C
+
+    REQUIRE(state.r[0] == 0x20u);
+    REQUIRE(state.current_mode() == Mode::User);
+    REQUIRE(state.cpsr == pre_cpsr);
+    REQUIRE(state.pc == kArmBase + 4u);
+}
+
 // ARM-state SWI 0x01 — invalid, hits the `default` warn path.
 static void arm_swi_0x01_invalid_default() {
     NDS nds;
@@ -371,11 +389,12 @@ int main() {
     arm_swi_0x15_rl_callback_real();
     arm_swi_0x1a_get_sine_table();
     arm_swi_0x1b_get_pitch_table();
+    arm_swi_0x1c_get_volume_table();
     arm_swi_0x01_invalid_default();
     arm_swi_0x02_invalid_default();
     thumb_swi_0x0a_invalid_default();
     swi_stubs_preserve_r0_through_r12();
     arm_swi_from_system_mode_returns_to_system();
-    std::puts("arm7_bios_dispatch_test: all 15 cases passed");
+    std::puts("arm7_bios_dispatch_test: all 16 cases passed");
     return 0;
 }

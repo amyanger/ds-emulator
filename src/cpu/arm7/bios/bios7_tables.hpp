@@ -26,4 +26,9 @@ inline constexpr u32 kPitchTableSize = 0x300;
 u16 pitch_table_lookup(u32 index);
 u32 bios7_get_pitch_table(Arm7State& state, Arm7Bus& bus);
 
+// SWI 0x1C — GetVolumeTable.
+inline constexpr u32 kVolumeTableSize = 0x2D4;
+u8 volume_table_lookup(u32 index);
+u32 bios7_get_volume_table(Arm7State& state, Arm7Bus& bus);
+
 } // namespace ds

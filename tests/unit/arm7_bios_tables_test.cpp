@@ -267,6 +267,113 @@ static void get_pitch_table_handler_clamps_max_u32() {
     REQUIRE(state.r[0] == pitch_table_lookup(0x2FFu));
 }
 
+// SWI 0x1C VolumeTable lookup + handler (slice 3h commit 4).
+//
+// GBATEK does not publish byte values; the 724-byte table is generated once
+// by tools/gen_volume_table.py from a four-segment piecewise-log shape
+// (spec §4.7). Tests below pin the shape: segment endpoints, monotonic
+// regions, overall byte range, and handler wire-up / clamping.
+
+static void volume_table_index_zero_returns_zero() {
+    REQUIRE(volume_table_lookup(0) == 0x00u);
+}
+
+static void volume_table_segment_0_endpoint() {
+    REQUIRE(volume_table_lookup(0xBC) == 0x7Fu);
+}
+
+static void volume_table_segment_1_start() {
+    REQUIRE(volume_table_lookup(0xBD) == 0x20u);
+}
+
+static void volume_table_segment_1_endpoint() {
+    REQUIRE(volume_table_lookup(0x179) == 0x7Eu);
+}
+
+static void volume_table_segment_2_start() {
+    REQUIRE(volume_table_lookup(0x17A) == 0x40u);
+}
+
+static void volume_table_segment_2_endpoint() {
+    REQUIRE(volume_table_lookup(0x202) == 0x7Eu);
+}
+
+static void volume_table_segment_3_start() {
+    REQUIRE(volume_table_lookup(0x203) == 0x40u);
+}
+
+static void volume_table_segment_3_endpoint() {
+    REQUIRE(volume_table_lookup(0x2D3) == 0x7Fu);
+}
+
+// Each segment is internally non-decreasing. The jumps at the segment
+// boundaries (e.g. 0x7F → 0x20 at 0xBC → 0xBD) are the shape's intended
+// "restart" points and are covered by the per-segment endpoint/start tests.
+static void volume_table_segment_0_monotonic() {
+    for (u32 i = 1; i <= 0xBC; ++i) {
+        REQUIRE(volume_table_lookup(i) >= volume_table_lookup(i - 1));
+    }
+}
+
+static void volume_table_segment_1_monotonic() {
+    for (u32 i = 0xBE; i <= 0x179; ++i) {
+        REQUIRE(volume_table_lookup(i) >= volume_table_lookup(i - 1));
+    }
+}
+
+static void volume_table_segment_2_monotonic() {
+    for (u32 i = 0x17B; i <= 0x202; ++i) {
+        REQUIRE(volume_table_lookup(i) >= volume_table_lookup(i - 1));
+    }
+}
+
+static void volume_table_segment_3_monotonic() {
+    for (u32 i = 0x204; i <= 0x2D3; ++i) {
+        REQUIRE(volume_table_lookup(i) >= volume_table_lookup(i - 1));
+    }
+}
+
+// GBATEK: R0 out is a u8 in 0x00..0x7F.
+static void volume_table_all_values_in_range() {
+    for (u32 i = 0; i <= 0x2D3; ++i) {
+        REQUIRE(volume_table_lookup(i) <= 0x7Fu);
+    }
+}
+
+// R0 = 0xBD lands on the segment-1 restart (value 0x20). Any mis-routing
+// or a wrong curve that smoothed through the boundary would fail here.
+static void get_volume_table_handler_routes_to_lookup() {
+    NDS nds;
+    auto& state = nds.cpu7().state();
+    state.r[0] = 0xBDu;
+    bios7_get_volume_table(state, nds.arm7_bus());
+    REQUIRE(state.r[0] == 0x20u);
+}
+
+static void get_volume_table_handler_returns_one_cycle() {
+    NDS nds;
+    auto& state = nds.cpu7().state();
+    state.r[0] = 0u;
+    const u32 cycles = bios7_get_volume_table(state, nds.arm7_bus());
+    REQUIRE(cycles == 1u);
+}
+
+static void get_volume_table_handler_clamps_one_past_end() {
+    NDS nds;
+    auto& state = nds.cpu7().state();
+    state.r[0] = 0x2D4u;
+    bios7_get_volume_table(state, nds.arm7_bus());
+    REQUIRE(state.r[0] == volume_table_lookup(0x2D3u));
+}
+
+static void get_volume_table_handler_clamps_max_u32() {
+    NDS nds;
+    auto& state = nds.cpu7().state();
+    state.r[0] = 0xFFFFFFFFu;
+    bios7_get_volume_table(state, nds.arm7_bus());
+    REQUIRE(state.r[0] == volume_table_lookup(0x2D3u));
+}
+
 int main() {
     soundbias_reset_value_is_0x0200();
     soundbias_write32_stores_low_10_bits();
@@ -295,6 +402,23 @@ int main() {
     get_pitch_table_handler_returns_one_cycle();
     get_pitch_table_handler_clamps_one_past_end();
     get_pitch_table_handler_clamps_max_u32();
-    std::puts("arm7_bios_tables_test: all 27 cases passed");
+    volume_table_index_zero_returns_zero();
+    volume_table_segment_0_endpoint();
+    volume_table_segment_1_start();
+    volume_table_segment_1_endpoint();
+    volume_table_segment_2_start();
+    volume_table_segment_2_endpoint();
+    volume_table_segment_3_start();
+    volume_table_segment_3_endpoint();
+    volume_table_segment_0_monotonic();
+    volume_table_segment_1_monotonic();
+    volume_table_segment_2_monotonic();
+    volume_table_segment_3_monotonic();
+    volume_table_all_values_in_range();
+    get_volume_table_handler_routes_to_lookup();
+    get_volume_table_handler_returns_one_cycle();
+    get_volume_table_handler_clamps_one_past_end();
+    get_volume_table_handler_clamps_max_u32();
+    std::puts("arm7_bios_tables_test: all 44 cases passed");
     return 0;
 }
