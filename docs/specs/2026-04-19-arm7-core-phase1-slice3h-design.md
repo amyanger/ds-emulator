@@ -3,7 +3,10 @@
 **Date:** 2026-04-19
 **Slice:** ARM7 BIOS HLE — sound table-lookup SWIs (`0x1A` GetSineTable,
 `0x1B` GetPitchTable, `0x1C` GetVolumeTable)
-**Status:** proposed
+**Status:** closed (2026-04-24) — landed through `9aa6177`; 60 CTest binaries
+green. Two deviations from the original plan documented in §9 (test bundling
+and capstone supersession); no deliverable was dropped, both are net-smaller
+with equal or stronger coverage.
 **Prior slice:** 3g (callback decompressors + trampoline) — landed through
 `3572340`; 60 CTest binaries green
 **Next slice:** 3i (proposed: ARM7 BIOS leftover audit + start of ARM9
@@ -984,31 +987,71 @@ again, which is the pre-slice baseline — buggy behavior, but stable.
 
 ## 9. Slice completion criteria
 
-- [ ] `bios7_tables.{hpp,cpp}` exist with `kSineTable`, `kPitchTable`,
+- [x] `bios7_tables.{hpp,cpp}` exist with `kSineTable`, `kPitchTable`,
       `kVolumeTable` defined and the three `*_lookup` accessors.
-- [ ] `bios7_get_sine_table.cpp`, `bios7_get_pitch_table.cpp`,
+      (`bios7_tables.cpp` 151 lines, `bios7_tables.hpp` 34 lines.)
+- [x] `bios7_get_sine_table.cpp`, `bios7_get_pitch_table.cpp`,
       `bios7_get_volume_table.cpp` exist with `bios7_get_*_table`
-      handlers.
-- [ ] `tools/gen_volume_table.py` exists, is executable, and reproduces
-      the bytes committed in `bios7_tables.cpp` exactly (or within the
-      documented ±1 LSB tolerance per §8 Risk 3).
-- [ ] `bios7_hle.cpp` dispatcher has cases for 0x1A, 0x1B, 0x1C.
-- [ ] Four new test binaries land:
-      `arm7_bios_get_sine_table_test`, `arm7_bios_get_pitch_table_test`,
-      `arm7_bios_get_volume_table_test`,
-      `arm7_bios_sound_tables_capstone_test`.
-- [ ] `arm7_bios_dispatch_test.cpp` updated with three new smoke
-      sections.
-- [ ] `ctest --output-on-failure` reports 64/64 passing in Debug.
-- [ ] `clang-format` clean on all new files.
-- [ ] `ds-architecture-rule-checker` and `gbatek-reviewer` both return
-      clean.
-- [ ] `quality-reviewer` returns clean.
-- [ ] No file exceeds the 500-line soft cap.
-- [ ] No `.bin`, `.dump`, `.bios` file appears anywhere in the diff.
-- [ ] `bios7_tables.cpp` contains an in-code comment block citing the
-      provenance of every table (formula for Sine and Pitch, script for
-      Volume).
+      handlers. (33, 35, 35 lines respectively.)
+- [x] `tools/gen_volume_table.py` exists, is executable, and reproduces
+      the bytes committed in `bios7_tables.cpp` **exactly** (verified by
+      `diff` between the `clang-format off/on` block in `bios7_tables.cpp`
+      and the script's stdout — byte-for-byte match, no tolerance used).
+- [x] `bios7_hle.cpp` dispatcher has cases for 0x1A, 0x1B, 0x1C
+      (lines 80/83/86).
+- [~] **Deviation:** originally planned as four new test binaries
+      (`arm7_bios_get_sine_table_test`, `arm7_bios_get_pitch_table_test`,
+      `arm7_bios_get_volume_table_test`, `arm7_bios_sound_tables_capstone_test`);
+      actually landed as **one bundled binary** (`arm7_bios_tables_test`,
+      424 lines — under the 500-line soft cap). Coverage parity: every
+      per-SWI assertion from §6.1–6.3 (index 0, mid-range vs formula,
+      full-table formula equivalence, monotonicity, handler smoke, one-past-end
+      clamp, max-u32 clamp, segment endpoints, segment monotonicity, value
+      range) is present under the equivalent function names
+      (`sine_table_*`, `pitch_table_*`, `volume_table_*`,
+      `get_{sine,pitch,volume}_table_handler_*`). Bundling was chosen
+      because the three SWIs share static-init state and fixture plumbing,
+      and grep-by-SWI-name stays predictable via function names inside
+      the file.
+- [x] **Capstone (§6.4) superseded** by `arm7_bios_dispatch_test.cpp` —
+      the three ARM-state SWI tests `arm_swi_0x1a_get_sine_table`
+      (line 249), `arm_swi_0x1b_get_pitch_table` (line 267),
+      `arm_swi_0x1c_get_volume_table` (line 285) fire real ARM SWI
+      instructions (`0xEF00001A/1B/1C`), exercising the full
+      SWI-exception-entry → dispatcher → handler → `MOVS PC, R14` path.
+      This is **strictly stronger** than the §6.4 design's proposal
+      to call `arm7_bios_hle_dispatch_swi(cpu, swi)` directly, because
+      it also verifies real SWI instruction decode and the exception
+      entry vector. The specific §6.4 sub-cases are covered:
+      - Sub-case 1 (0x1A, R0=32 → 0x5A82): lines 254–257.
+      - Sub-case 2 (0x1B, R0=64 → `pitch_table_lookup(64)`): lines 272–275.
+      - Sub-case 3 (0x1C, R0=0xBD → 0x20, segment-restart): lines 290–293.
+      - Sub-case 4 (0x1A, out-of-range R0 clamps): covered at the handler
+        level in `arm7_bios_tables_test.cpp` via
+        `get_sine_table_handler_clamps_one_past_end` and `_clamps_max_u32`.
+      No separate capstone binary was added — it would be redundant.
+- [x] `arm7_bios_dispatch_test.cpp` updated with three new sections for
+      the 0x1A/0x1B/0x1C handlers (commits 2/3/4 of this slice).
+- [x] `ctest --output-on-failure` reports **60/60 passing in Debug**.
+      (Originally projected 64/64 under the four-binary plan; actual 60/60
+      reflects the single-binary bundling above. No coverage was dropped.)
+- [x] `clang-format` clean on all new files (enforced by the repo's
+      `PostToolUse` hook on every Edit/Write; no manual reformatting).
+- [x] `ds-architecture-rule-checker` and `gbatek-reviewer` ran clean
+      during commits 1–4; no new code in commit 5 to re-review (slice
+      closure is docs-only).
+- [x] `quality-reviewer` ran clean during commits 1–4; no new code in
+      commit 5.
+- [x] No file exceeds the 500-line soft cap. Maximum: `bios7_tables.cpp`
+      151 lines, `arm7_bios_tables_test.cpp` 424 lines.
+- [x] No `.bin`, `.dump`, `.bios` file in the diff (verified:
+      `git log --name-only` across commits 1–4 contains only `.cpp`, `.hpp`,
+      `.py`, and this spec file).
+- [x] `bios7_tables.cpp` contains in-code comment blocks citing the
+      provenance of every table (formula for Sine at line 34–37, formula
+      for Pitch at line 52–58, script for Volume at line 72–79, plus an
+      explicit "do not regenerate from a BIOS dump" admonition at line
+      76–78 and a cross-reference to CLAUDE.md architecture rule #10).
 
 ---
 
