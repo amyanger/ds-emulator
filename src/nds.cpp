@@ -33,10 +33,12 @@ void NDS::reset() {
     arm9_bus_.reset();
     arm7_bus_.reset();
     soundbias_ = 0x0200u;
+    irq9_.reset();
     irq7_.reset();
-    // After reset IME/IE/IF are all zero so the line is false. Push it into
-    // cpu7_ explicitly so state is consistent even if Arm7::reset() is ever
-    // re-ordered relative to irq7_.reset() in the future.
+    // After reset IME/IE/IF are all zero on both sides so each line is false.
+    // Push the signals explicitly so state is consistent even if a future
+    // refactor reorders the controller resets relative to the CPU resets.
+    update_arm9_irq_signals();
     update_arm7_irq_signals();
 }
 
@@ -67,20 +69,131 @@ void NDS::on_scheduler_event(const Event& ev) {
     }
 }
 
-u32 NDS::arm9_io_read32(u32 /*addr*/) {
+u32 NDS::arm9_io_read32(u32 addr) {
+    switch (addr) {
+    case IO_IME:
+        return irq9_.read_ime();
+    case IO_IE:
+        return irq9_.read_ie();
+    case IO_IF:
+        return irq9_.read_if();
+    default:
+        return 0;
+    }
+}
+
+u16 NDS::arm9_io_read16(u32 addr) {
+    if (addr == IO_IME) {
+        return static_cast<u16>(irq9_.read_ime() & 0xFFFFu);
+    }
+    if (addr == IO_IE) {
+        return static_cast<u16>(irq9_.read_ie() & 0xFFFFu);
+    }
+    if (addr == IO_IE + 2u) {
+        return static_cast<u16>((irq9_.read_ie() >> 16) & 0xFFFFu);
+    }
+    if (addr == IO_IF) {
+        return static_cast<u16>(irq9_.read_if() & 0xFFFFu);
+    }
+    if (addr == IO_IF + 2u) {
+        return static_cast<u16>((irq9_.read_if() >> 16) & 0xFFFFu);
+    }
     return 0;
 }
-u16 NDS::arm9_io_read16(u32 /*addr*/) {
+
+u8 NDS::arm9_io_read8(u32 addr) {
+    if (addr >= IO_IME && addr < IO_IME + 4u) {
+        const u32 shift = (addr - IO_IME) * 8u;
+        return static_cast<u8>((irq9_.read_ime() >> shift) & 0xFFu);
+    }
+    if (addr >= IO_IE && addr < IO_IE + 4u) {
+        const u32 shift = (addr - IO_IE) * 8u;
+        return static_cast<u8>((irq9_.read_ie() >> shift) & 0xFFu);
+    }
+    if (addr >= IO_IF && addr < IO_IF + 4u) {
+        const u32 shift = (addr - IO_IF) * 8u;
+        return static_cast<u8>((irq9_.read_if() >> shift) & 0xFFu);
+    }
     return 0;
 }
-u8 NDS::arm9_io_read8(u32 /*addr*/) {
-    return 0;
+
+void NDS::arm9_io_write32(u32 addr, u32 value) {
+    switch (addr) {
+    case IO_IME:
+        irq9_.write_ime(value);
+        update_arm9_irq_signals();
+        break;
+    case IO_IE:
+        irq9_.write_ie(value);
+        update_arm9_irq_signals();
+        break;
+    case IO_IF:
+        // write-1-clear: clears every bit set in `value`, leaves the rest alone.
+        irq9_.write_if(value);
+        update_arm9_irq_signals();
+        break;
+    default:
+        break;
+    }
 }
-void NDS::arm9_io_write32(u32 /*addr*/, u32 /*value*/) {}
-void NDS::arm9_io_write16(u32 /*addr*/, u16 /*value*/) {}
+
+void NDS::arm9_io_write16(u32 addr, u16 value) {
+    if (addr == IO_IME) {
+        irq9_.write_ime(value);
+        update_arm9_irq_signals();
+        return;
+    }
+    if (addr == IO_IE) {
+        const u32 cur = irq9_.read_ie();
+        irq9_.write_ie((cur & 0xFFFF0000u) | value);
+        update_arm9_irq_signals();
+        return;
+    }
+    if (addr == IO_IE + 2u) {
+        const u32 cur = irq9_.read_ie();
+        irq9_.write_ie((cur & 0x0000FFFFu) | (static_cast<u32>(value) << 16));
+        update_arm9_irq_signals();
+        return;
+    }
+    // IF halfword: write-1-clear applies per-bit to the targeted halfword.
+    if (addr == IO_IF) {
+        irq9_.write_if(static_cast<u32>(value));
+        update_arm9_irq_signals();
+        return;
+    }
+    if (addr == IO_IF + 2u) {
+        irq9_.write_if(static_cast<u32>(value) << 16);
+        update_arm9_irq_signals();
+        return;
+    }
+}
+
 void NDS::arm9_io_write8(u32 addr, u8 value) {
-    // WRAMCNT is the only I/O register handled in slice 2. Everything else
-    // is an accepted no-op until later slices wire the remaining I/O.
+    if (addr == IO_IME) {
+        irq9_.write_ime(value);
+        update_arm9_irq_signals();
+        return;
+    }
+    // IO_IME+1..+3 are reserved bytes of a register where only bit 0 of the
+    // first byte is defined; writes to them are ignored on hardware.
+    if (addr > IO_IME && addr < IO_IME + 4u) {
+        return;
+    }
+    if (addr >= IO_IE && addr < IO_IE + 4u) {
+        const u32 shift = (addr - IO_IE) * 8u;
+        const u32 mask = ~(static_cast<u32>(0xFFu) << shift);
+        const u32 cur = irq9_.read_ie();
+        irq9_.write_ie((cur & mask) | (static_cast<u32>(value) << shift));
+        update_arm9_irq_signals();
+        return;
+    }
+    // IF byte: write-1-clear on just the bits covered by this byte.
+    if (addr >= IO_IF && addr < IO_IF + 4u) {
+        const u32 shift = (addr - IO_IF) * 8u;
+        irq9_.write_if(static_cast<u32>(value) << shift);
+        update_arm9_irq_signals();
+        return;
+    }
     if (addr == 0x0400'0247u) {
         wram_ctl_.write(value);
         arm9_bus_.rebuild_shared_wram();
@@ -91,6 +204,12 @@ void NDS::arm9_io_write8(u32 addr, u8 value) {
 void NDS::update_arm7_irq_signals() {
     cpu7_.set_irq_line(irq7_.line());
     cpu7_.set_halt_wake_pending(irq7_.halt_wake_pending());
+}
+
+void NDS::update_arm9_irq_signals() {
+    // ARM9 stub has no set_irq_line() yet, so cache the line for X-Ray.
+    // Becomes cpu9_.set_irq_line(irq9_.line()) once the ARM9 decoder lands.
+    arm9_irq_line_cached_ = irq9_.line();
 }
 
 u32 NDS::arm7_io_read32(u32 addr) {

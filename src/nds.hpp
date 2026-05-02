@@ -34,12 +34,19 @@ public:
     // subsystem's state. Use raise()/reg-writes via NDS glue instead.
     IrqController& irq7() { return irq7_; }
 
+    // Test/debug accessor for the ARM9 IRQ controller. Same caveat as irq7().
+    IrqController& irq9() { return irq9_; }
+
+    // Cached ARM9 IRQ line bool. Recomputed on every IME/IE/IF write because
+    // the ARM9 stub has no set_irq_line(); when the ARM9 decoder lands this
+    // cache becomes a direct push into cpu9_ and the accessor goes away.
+    bool arm9_irq_line_cached() const { return arm9_irq_line_cached_; }
+
     // Test/debug accessor for the SOUNDBIAS register. NOT for cross-subsystem use.
     u16 soundbias() const { return soundbias_; }
 
-    // ARM9 I/O dispatch. Only arm9_io_write8 handles a real register in
-    // this slice — WRAMCNT at 0x0400'0247. All other I/O reads return 0
-    // and writes are ignored until later slices wire more registers.
+    // ARM9 I/O dispatch. Routes IME/IE/IF and WRAMCNT (write8 at 0x0400'0247);
+    // unmapped reads return 0 and unmapped writes are dropped.
     u32 arm9_io_read32(u32 addr);
     u16 arm9_io_read16(u32 addr);
     u8 arm9_io_read8(u32 addr);
@@ -47,8 +54,8 @@ public:
     void arm9_io_write16(u32 addr, u16 value);
     void arm9_io_write8(u32 addr, u8 value);
 
-    // ARM7 I/O dispatch. Slice 3d wires IME/IE/IF; other registers remain
-    // stubbed until later slices land.
+    // ARM7 I/O dispatch. Routes IME/IE/IF and SOUNDBIAS; unmapped reads
+    // return 0 and unmapped writes are dropped.
     u32 arm7_io_read32(u32 addr);
     u16 arm7_io_read16(u32 addr);
     u8 arm7_io_read8(u32 addr);
@@ -66,6 +73,11 @@ private:
     // IME/IE/IF and after reset. Lives here (not on the controller) because
     // no subsystem may hold a pointer to another (rule 3).
     void update_arm7_irq_signals();
+
+    // ARM9 counterpart of update_arm7_irq_signals. The ARM9 stub has no
+    // set_irq_line() yet, so the body only caches the line bool; once
+    // Arm9 has set_irq_line(), the body becomes a direct push.
+    void update_arm9_irq_signals();
 
     Scheduler scheduler_;
     Arm9 cpu9_;
@@ -85,6 +97,8 @@ private:
     WramControl wram_ctl_{};
     Arm9Bus arm9_bus_;
     Arm7Bus arm7_bus_;
+    IrqController irq9_{};
+    bool arm9_irq_line_cached_ = false;
     IrqController irq7_{};
     u16 soundbias_ = 0x0200u;
 };
