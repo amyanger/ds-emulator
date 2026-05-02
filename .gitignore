@@ -38,5 +38,8 @@ stderr.log
 CLAUDE.md
 docs/plans/
 
+# Claude Code transient lock files
+.claude/scheduled_tasks.lock
+
 # CTest output when run from project root
 Testing/
