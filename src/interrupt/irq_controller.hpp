@@ -1,16 +1,15 @@
 #pragma once
 
-// Per-CPU interrupt controller: IME, IE, IF plus line computation. Slice 3d
-// wires this on the ARM7 side; an identical class will serve ARM9 in a later
-// slice. No pointer to CPU or bus — NDS glues them together (rule 3). This
-// header has no dependencies on cpu/ or bus/ code (rule 8): the controller
-// is pure state plus pure functions of state.
+// Per-CPU interrupt controller: IME, IE, IF plus line computation. NDS
+// instantiates one per CPU. No pointer to CPU or bus — NDS glues them
+// together (rule 3). This header has no dependencies on cpu/ or bus/ code
+// (rule 8): the controller is pure state plus pure functions of state.
 
 #include "ds/common.hpp"
 
 namespace ds {
 
-class Arm7IrqController {
+class IrqController {
 public:
     void reset() {
         ime_ = 0;

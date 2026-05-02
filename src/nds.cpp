@@ -33,10 +33,10 @@ void NDS::reset() {
     arm9_bus_.reset();
     arm7_bus_.reset();
     soundbias_ = 0x0200u;
-    irq7_ctrl_.reset();
+    irq7_.reset();
     // After reset IME/IE/IF are all zero so the line is false. Push it into
     // cpu7_ explicitly so state is consistent even if Arm7::reset() is ever
-    // re-ordered relative to irq7_ctrl_.reset() in the future.
+    // re-ordered relative to irq7_.reset() in the future.
     update_arm7_irq_signals();
 }
 
@@ -89,18 +89,18 @@ void NDS::arm9_io_write8(u32 addr, u8 value) {
 }
 
 void NDS::update_arm7_irq_signals() {
-    cpu7_.set_irq_line(irq7_ctrl_.line());
-    cpu7_.set_halt_wake_pending(irq7_ctrl_.halt_wake_pending());
+    cpu7_.set_irq_line(irq7_.line());
+    cpu7_.set_halt_wake_pending(irq7_.halt_wake_pending());
 }
 
 u32 NDS::arm7_io_read32(u32 addr) {
     switch (addr) {
     case IO_IME:
-        return irq7_ctrl_.read_ime();
+        return irq7_.read_ime();
     case IO_IE:
-        return irq7_ctrl_.read_ie();
+        return irq7_.read_ie();
     case IO_IF:
-        return irq7_ctrl_.read_if();
+        return irq7_.read_if();
     default:
         return 0;
     }
@@ -110,20 +110,20 @@ u16 NDS::arm7_io_read16(u32 addr) {
     // IME: bit 0 in the low halfword, upper bits reserved as zero. DS mirror
     // at 0x04000208 + 2 is not a thing — only the low halfword is defined.
     if (addr == IO_IME) {
-        return static_cast<u16>(irq7_ctrl_.read_ime() & 0xFFFFu);
+        return static_cast<u16>(irq7_.read_ime() & 0xFFFFu);
     }
     // IE/IF split low / high halfword windows over the 32-bit register.
     if (addr == IO_IE) {
-        return static_cast<u16>(irq7_ctrl_.read_ie() & 0xFFFFu);
+        return static_cast<u16>(irq7_.read_ie() & 0xFFFFu);
     }
     if (addr == IO_IE + 2u) {
-        return static_cast<u16>((irq7_ctrl_.read_ie() >> 16) & 0xFFFFu);
+        return static_cast<u16>((irq7_.read_ie() >> 16) & 0xFFFFu);
     }
     if (addr == IO_IF) {
-        return static_cast<u16>(irq7_ctrl_.read_if() & 0xFFFFu);
+        return static_cast<u16>(irq7_.read_if() & 0xFFFFu);
     }
     if (addr == IO_IF + 2u) {
-        return static_cast<u16>((irq7_ctrl_.read_if() >> 16) & 0xFFFFu);
+        return static_cast<u16>((irq7_.read_if() >> 16) & 0xFFFFu);
     }
     return 0;
 }
@@ -133,15 +133,15 @@ u8 NDS::arm7_io_read8(u32 addr) {
     // IME/IE/IF windows are routed here; other I/O is still stubbed.
     if (addr >= IO_IME && addr < IO_IME + 4u) {
         const u32 shift = (addr - IO_IME) * 8u;
-        return static_cast<u8>((irq7_ctrl_.read_ime() >> shift) & 0xFFu);
+        return static_cast<u8>((irq7_.read_ime() >> shift) & 0xFFu);
     }
     if (addr >= IO_IE && addr < IO_IE + 4u) {
         const u32 shift = (addr - IO_IE) * 8u;
-        return static_cast<u8>((irq7_ctrl_.read_ie() >> shift) & 0xFFu);
+        return static_cast<u8>((irq7_.read_ie() >> shift) & 0xFFu);
     }
     if (addr >= IO_IF && addr < IO_IF + 4u) {
         const u32 shift = (addr - IO_IF) * 8u;
-        return static_cast<u8>((irq7_ctrl_.read_if() >> shift) & 0xFFu);
+        return static_cast<u8>((irq7_.read_if() >> shift) & 0xFFu);
     }
     return 0;
 }
@@ -149,16 +149,16 @@ u8 NDS::arm7_io_read8(u32 addr) {
 void NDS::arm7_io_write32(u32 addr, u32 value) {
     switch (addr) {
     case IO_IME:
-        irq7_ctrl_.write_ime(value);
+        irq7_.write_ime(value);
         update_arm7_irq_signals();
         break;
     case IO_IE:
-        irq7_ctrl_.write_ie(value);
+        irq7_.write_ie(value);
         update_arm7_irq_signals();
         break;
     case IO_IF:
         // write-1-clear: clears every bit set in `value`, leaves the rest alone.
-        irq7_ctrl_.write_if(value);
+        irq7_.write_if(value);
         update_arm7_irq_signals();
         break;
     case IO_SOUNDBIAS:
@@ -173,20 +173,20 @@ void NDS::arm7_io_write16(u32 addr, u16 value) {
     // IME halfword: bit 0 of `value` updates IME; upper bits of the register
     // are reserved and ignored by the controller (write_ime masks to bit 0).
     if (addr == IO_IME) {
-        irq7_ctrl_.write_ime(value);
+        irq7_.write_ime(value);
         update_arm7_irq_signals();
         return;
     }
     // IE halfword: merge into the correct half of the 32-bit value.
     if (addr == IO_IE) {
-        const u32 cur = irq7_ctrl_.read_ie();
-        irq7_ctrl_.write_ie((cur & 0xFFFF0000u) | value);
+        const u32 cur = irq7_.read_ie();
+        irq7_.write_ie((cur & 0xFFFF0000u) | value);
         update_arm7_irq_signals();
         return;
     }
     if (addr == IO_IE + 2u) {
-        const u32 cur = irq7_ctrl_.read_ie();
-        irq7_ctrl_.write_ie((cur & 0x0000FFFFu) | (static_cast<u32>(value) << 16));
+        const u32 cur = irq7_.read_ie();
+        irq7_.write_ie((cur & 0x0000FFFFu) | (static_cast<u32>(value) << 16));
         update_arm7_irq_signals();
         return;
     }
@@ -195,12 +195,12 @@ void NDS::arm7_io_write16(u32 addr, u16 value) {
     // zero-extended or shifted 32-bit clear-mask. Only the bits in `value`
     // are cleared.
     if (addr == IO_IF) {
-        irq7_ctrl_.write_if(static_cast<u32>(value));
+        irq7_.write_if(static_cast<u32>(value));
         update_arm7_irq_signals();
         return;
     }
     if (addr == IO_IF + 2u) {
-        irq7_ctrl_.write_if(static_cast<u32>(value) << 16);
+        irq7_.write_if(static_cast<u32>(value) << 16);
         update_arm7_irq_signals();
         return;
     }
@@ -226,7 +226,7 @@ void NDS::arm7_io_write8(u32 addr, u8 value) {
     // The upper three bytes (IO_IME+1..+3) are reserved and writes to them are
     // ignored — no state change, no line recompute.
     if (addr == IO_IME) {
-        irq7_ctrl_.write_ime(value);
+        irq7_.write_ime(value);
         update_arm7_irq_signals();
         return;
     }
@@ -238,15 +238,15 @@ void NDS::arm7_io_write8(u32 addr, u8 value) {
     if (addr >= IO_IE && addr < IO_IE + 4u) {
         const u32 shift = (addr - IO_IE) * 8u;
         const u32 mask = ~(static_cast<u32>(0xFFu) << shift);
-        const u32 cur = irq7_ctrl_.read_ie();
-        irq7_ctrl_.write_ie((cur & mask) | (static_cast<u32>(value) << shift));
+        const u32 cur = irq7_.read_ie();
+        irq7_.write_ie((cur & mask) | (static_cast<u32>(value) << shift));
         update_arm7_irq_signals();
         return;
     }
     // IF byte: write-1-clear on just the bits covered by this byte.
     if (addr >= IO_IF && addr < IO_IF + 4u) {
         const u32 shift = (addr - IO_IF) * 8u;
-        irq7_ctrl_.write_if(static_cast<u32>(value) << shift);
+        irq7_.write_if(static_cast<u32>(value) << shift);
         update_arm7_irq_signals();
         return;
     }

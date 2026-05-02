@@ -1,8 +1,5 @@
-// arm7_irq_controller_test.cpp — exercises the Arm7IrqController state
-// machine (IME/IE/IF + line()) and the ARM7 I/O routing that lives in NDS.
-// Slice 3d commit 3. No IRQ sampling yet — that arrives in commit 10. This
-// test only proves the plumbing: writes land, write-1-clear on IF behaves,
-// raise() sets bits, and NDS pushes line() into cpu7_'s irq_line_ field.
+// Exercises the IrqController state machine (IME/IE/IF + line()) and the
+// ARM7 I/O routing that lives in NDS.
 
 #include "bus/io_regs.hpp"
 #include "cpu/arm7/arm7.hpp"
@@ -16,7 +13,7 @@ using namespace ds;
 
 // Case 1: with IME=0 the line must never assert, no matter what IE/IF say.
 static void ime_disabled_means_no_line() {
-    Arm7IrqController ctrl;
+    IrqController ctrl;
     ctrl.reset();
     ctrl.write_ie(0xFFu);
     ctrl.raise(0x01u); // IF = 1
@@ -25,7 +22,7 @@ static void ime_disabled_means_no_line() {
 
 // Case 2: with IME=1, a bit set in both IE and IF asserts the line.
 static void ime_enabled_with_matching_ie_if_bit_asserts_line() {
-    Arm7IrqController ctrl;
+    IrqController ctrl;
     ctrl.reset();
     ctrl.write_ime(1u);
     ctrl.write_ie(0x1u);
@@ -36,7 +33,7 @@ static void ime_enabled_with_matching_ie_if_bit_asserts_line() {
 // Case 3: write_if is write-1-clear. Starting IF = 0b111, writing 0b010
 // should clear bit 1 only, leaving IF = 0b101.
 static void write_1_clears_if_bit() {
-    Arm7IrqController ctrl;
+    IrqController ctrl;
     ctrl.reset();
     ctrl.write_ime(1u);
     ctrl.write_ie(0x7u);
@@ -51,7 +48,7 @@ static void write_1_clears_if_bit() {
 
 // Case 4: raise() ORs source bits into IF without any auto-clear.
 static void raise_sets_if_bit_without_auto_clear() {
-    Arm7IrqController ctrl;
+    IrqController ctrl;
     ctrl.reset();
     REQUIRE(ctrl.read_if() == 0u);
     ctrl.raise(0x10u);

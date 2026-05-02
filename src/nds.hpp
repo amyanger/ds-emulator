@@ -32,7 +32,7 @@ public:
     // Test/debug accessor for the ARM7 IRQ controller. NOT for cross-subsystem
     // use — subsystems must never reach through NDS to pull on another
     // subsystem's state. Use raise()/reg-writes via NDS glue instead.
-    Arm7IrqController& irq7() { return irq7_ctrl_; }
+    IrqController& irq7() { return irq7_; }
 
     // Test/debug accessor for the SOUNDBIAS register. NOT for cross-subsystem use.
     u16 soundbias() const { return soundbias_; }
@@ -85,7 +85,7 @@ private:
     WramControl wram_ctl_{};
     Arm9Bus arm9_bus_;
     Arm7Bus arm7_bus_;
-    Arm7IrqController irq7_ctrl_{};
+    IrqController irq7_{};
     u16 soundbias_ = 0x0200u;
 };
 
