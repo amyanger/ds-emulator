@@ -41,6 +41,8 @@ private:
         bool irq_enable = false;
     };
 
+    static constexpr Side other(Side side) { return side == Side::Arm9 ? Side::Arm7 : Side::Arm9; }
+
     SideState& state(Side side);
     const SideState& state(Side side) const;
 

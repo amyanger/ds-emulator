@@ -95,6 +95,46 @@ static void ipc_sync_byte_access() {
     REQUIRE(nds.arm9_io_read8(IO_IPCSYNC + 1u) == 0x43u);
 }
 
+// Case 9: ARM9 sets bit 13 with ARM7's irq_enable on → ARM7 IF.16 raised.
+static void ipc_sync_bit13_arm9_to_arm7_raises_when_enabled() {
+    NDS nds;
+
+    nds.arm7_io_write16(IO_IPCSYNC, 0x4000u); // ARM7 enables receive
+    nds.arm9_io_write16(IO_IPCSYNC, 0x2000u); // ARM9 fires bit 13
+    REQUIRE((nds.irq7().read_if() & (1u << 16)) != 0u);
+    REQUIRE((nds.irq9().read_if() & (1u << 16)) == 0u);
+}
+
+// Case 10: bit 13 is silently dropped if the receiver hasn't enabled.
+static void ipc_sync_bit13_no_raise_when_remote_disabled() {
+    NDS nds;
+
+    nds.arm9_io_write16(IO_IPCSYNC, 0x2000u);
+    REQUIRE(nds.irq7().read_if() == 0u);
+    REQUIRE(nds.irq9().read_if() == 0u);
+}
+
+// Case 11: bit 13 never raises the *sender's* IF, regardless of the sender's
+// own bit-14 state. The receiver's enable is what gates.
+static void ipc_sync_bit13_never_raises_local_irq() {
+    NDS nds;
+
+    nds.arm9_io_write16(IO_IPCSYNC, 0x4000u); // ARM9 enables its own bit 14
+    nds.arm9_io_write16(IO_IPCSYNC, 0x6000u); // bit 14 + bit 13
+    REQUIRE((nds.irq9().read_if() & (1u << 16)) == 0u);
+    REQUIRE((nds.irq7().read_if() & (1u << 16)) == 0u); // ARM7 didn't enable
+}
+
+// Case 12: symmetric — ARM7 sets bit 13 with ARM9's irq_enable on → ARM9 IF.16.
+static void ipc_sync_bit13_arm7_to_arm9_raises_when_enabled() {
+    NDS nds;
+
+    nds.arm9_io_write16(IO_IPCSYNC, 0x4000u);
+    nds.arm7_io_write16(IO_IPCSYNC, 0x2000u);
+    REQUIRE((nds.irq9().read_if() & (1u << 16)) != 0u);
+    REQUIRE((nds.irq7().read_if() & (1u << 16)) == 0u);
+}
+
 int main() {
     ipc_sync_reset_all_zero();
     std::puts("[PASS] ipc_sync_reset_all_zero");
@@ -112,6 +152,14 @@ int main() {
     std::puts("[PASS] ipc_sync_32bit_access_zero_extends");
     ipc_sync_byte_access();
     std::puts("[PASS] ipc_sync_byte_access");
-    std::puts("ipc_sync_test: all 8 cases passed");
+    ipc_sync_bit13_arm9_to_arm7_raises_when_enabled();
+    std::puts("[PASS] ipc_sync_bit13_arm9_to_arm7_raises_when_enabled");
+    ipc_sync_bit13_no_raise_when_remote_disabled();
+    std::puts("[PASS] ipc_sync_bit13_no_raise_when_remote_disabled");
+    ipc_sync_bit13_never_raises_local_irq();
+    std::puts("[PASS] ipc_sync_bit13_never_raises_local_irq");
+    ipc_sync_bit13_arm7_to_arm9_raises_when_enabled();
+    std::puts("[PASS] ipc_sync_bit13_arm7_to_arm9_raises_when_enabled");
+    std::puts("ipc_sync_test: all 12 cases passed");
     return 0;
 }
