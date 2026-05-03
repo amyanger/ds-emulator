@@ -14,6 +14,10 @@ constexpr u16 kCntRecvFull = 1u << 9;
 constexpr u16 kCntRecvNotEmptyIrq = 1u << 10;
 constexpr u16 kCntError = 1u << 14;
 constexpr u16 kCntMasterEnable = 1u << 15;
+
+// IF source bits raised on the per-side IRQ controller (per GBATEK §IPCFIFO).
+constexpr u32 kIfSendFifoEmpty = 1u << 17;
+constexpr u32 kIfRecvFifoNotEmpty = 1u << 18;
 } // namespace
 
 void IpcFifo::reset() {
@@ -169,9 +173,31 @@ const IpcFifo::SideCnt& IpcFifo::cnt(Side side) const {
     return side == Side::Arm9 ? arm9_cnt_ : arm7_cnt_;
 }
 
-void IpcFifo::recompute_irqs([[maybe_unused]] IrqController& arm9_irq,
-                             [[maybe_unused]] IrqController& arm7_irq) {
-    // No-op until both sides' edge-triggered raise paths are wired.
+void IpcFifo::recompute_irqs(IrqController& arm9_irq, IrqController& arm7_irq) {
+    // Per GBATEK §IPCFIFO: IF.17 raises on the rising edge of
+    // (CNT.2 AND CNT.0)  — gated send-empty — and IF.18 raises on the rising
+    // edge of (CNT.10 AND NOT CNT.8) — gated recv-not-empty. Each side has
+    // its own pair of latches; per-side IRQs land on that side's controller.
+    // Discipline: compare-and-raise FIRST, latch update SECOND. Updating the
+    // latch before the compare loses the rising edge (spec §8.1 risk #1).
+    constexpr std::array<Side, 2> kSides{Side::Arm9, Side::Arm7};
+    for (Side side : kSides) {
+        SideCnt& c = cnt(side);
+        const Direction& s = send_dir(side);
+        const Direction& r = recv_dir(side);
+
+        const bool new_send_empty_gated = c.send_empty_irq && (s.count == 0);
+        const bool new_recv_not_empty_gated = c.recv_not_empty_irq && (r.count > 0);
+
+        IrqController& local_irq = (side == Side::Arm9) ? arm9_irq : arm7_irq;
+        if (new_send_empty_gated && !c.prev_send_empty_gated)
+            local_irq.raise(kIfSendFifoEmpty);
+        if (new_recv_not_empty_gated && !c.prev_recv_not_empty_gated)
+            local_irq.raise(kIfRecvFifoNotEmpty);
+
+        c.prev_send_empty_gated = new_send_empty_gated;
+        c.prev_recv_not_empty_gated = new_recv_not_empty_gated;
+    }
 }
 
 } // namespace ds
