@@ -22,4 +22,9 @@ constexpr u32 IO_SOUNDBIAS = 0x04000504u;
 // IPC synchronization register (NDS9/NDS7 — both buses, cross-CPU mirrored).
 constexpr u32 IO_IPCSYNC = 0x04000180u;
 
+// IPC FIFO control / send / receive (NDS9/NDS7 — both buses).
+constexpr u32 IO_IPCFIFOCNT = 0x04000184u;
+constexpr u32 IO_IPCFIFOSEND = 0x04000188u;
+constexpr u32 IO_IPCFIFORECV = 0x04100000u;
+
 } // namespace ds
