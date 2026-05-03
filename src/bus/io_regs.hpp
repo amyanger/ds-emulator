@@ -19,4 +19,7 @@ constexpr u32 IO_HALTCNT = 0x04000301u;
 // ARM7 sound bias (NDS7 only — ARM9 has no mapping, reads are open-bus).
 constexpr u32 IO_SOUNDBIAS = 0x04000504u;
 
+// IPC synchronization register (NDS9/NDS7 — both buses, cross-CPU mirrored).
+constexpr u32 IO_IPCSYNC = 0x04000180u;
+
 } // namespace ds

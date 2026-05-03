@@ -7,6 +7,7 @@
 #include "cpu/arm9/arm9.hpp"
 #include "ds/common.hpp"
 #include "interrupt/irq_controller.hpp"
+#include "ipc/ipc_sync.hpp"
 #include "scheduler/event.hpp"
 #include "scheduler/scheduler.hpp"
 
@@ -36,6 +37,10 @@ public:
 
     // Test/debug accessor for the ARM9 IRQ controller. Same caveat as irq7().
     IrqController& irq9() { return irq9_; }
+
+    // Test/debug accessor for the IPC sync register. NOT for cross-subsystem
+    // use — same caveat as irq9()/irq7().
+    IpcSync& ipc_sync() { return ipc_sync_; }
 
     // Cached ARM9 IRQ line bool. Recomputed on every IME/IE/IF write because
     // the ARM9 stub has no set_irq_line(); when the ARM9 decoder lands this
@@ -100,6 +105,7 @@ private:
     IrqController irq9_{};
     bool arm9_irq_line_cached_ = false;
     IrqController irq7_{};
+    IpcSync ipc_sync_{};
     u16 soundbias_ = 0x0200u;
 };
 

@@ -35,6 +35,7 @@ void NDS::reset() {
     soundbias_ = 0x0200u;
     irq9_.reset();
     irq7_.reset();
+    ipc_sync_.reset();
     // After reset IME/IE/IF are all zero on both sides so each line is false.
     // Push the signals explicitly so state is consistent even if a future
     // refactor reorders the controller resets relative to the CPU resets.
@@ -77,6 +78,8 @@ u32 NDS::arm9_io_read32(u32 addr) {
         return irq9_.read_ie();
     case IO_IF:
         return irq9_.read_if();
+    case IO_IPCSYNC:
+        return static_cast<u32>(ipc_sync_.read(IpcSync::Side::Arm9));
     default:
         return 0;
     }
@@ -98,6 +101,9 @@ u16 NDS::arm9_io_read16(u32 addr) {
     if (addr == IO_IF + 2u) {
         return static_cast<u16>((irq9_.read_if() >> 16) & 0xFFFFu);
     }
+    if (addr == IO_IPCSYNC) {
+        return ipc_sync_.read(IpcSync::Side::Arm9);
+    }
     return 0;
 }
 
@@ -113,6 +119,12 @@ u8 NDS::arm9_io_read8(u32 addr) {
     if (addr >= IO_IF && addr < IO_IF + 4u) {
         const u32 shift = (addr - IO_IF) * 8u;
         return static_cast<u8>((irq9_.read_if() >> shift) & 0xFFu);
+    }
+    if (addr == IO_IPCSYNC) {
+        return static_cast<u8>(ipc_sync_.read(IpcSync::Side::Arm9) & 0xFFu);
+    }
+    if (addr == IO_IPCSYNC + 1u) {
+        return static_cast<u8>((ipc_sync_.read(IpcSync::Side::Arm9) >> 8) & 0xFFu);
     }
     return 0;
 }
@@ -131,6 +143,10 @@ void NDS::arm9_io_write32(u32 addr, u32 value) {
         // write-1-clear: clears every bit set in `value`, leaves the rest alone.
         irq9_.write_if(value);
         update_arm9_irq_signals();
+        break;
+    case IO_IPCSYNC:
+        ipc_sync_.write(IpcSync::Side::Arm9, static_cast<u16>(value & 0xFFFFu), irq7_);
+        update_arm7_irq_signals();
         break;
     default:
         break;
@@ -166,6 +182,11 @@ void NDS::arm9_io_write16(u32 addr, u16 value) {
         update_arm9_irq_signals();
         return;
     }
+    if (addr == IO_IPCSYNC) {
+        ipc_sync_.write(IpcSync::Side::Arm9, value, irq7_);
+        update_arm7_irq_signals();
+        return;
+    }
 }
 
 void NDS::arm9_io_write8(u32 addr, u8 value) {
@@ -194,6 +215,22 @@ void NDS::arm9_io_write8(u32 addr, u8 value) {
         update_arm9_irq_signals();
         return;
     }
+    // IPCSYNC byte writes RMW through the 16-bit path so its side effects
+    // (bit-13 cross-CPU raise) run uniformly. Bytes 2-3 are reserved.
+    if (addr == IO_IPCSYNC) {
+        const u16 cur = ipc_sync_.read(IpcSync::Side::Arm9);
+        const u16 next = static_cast<u16>((cur & 0xFF00u) | value);
+        ipc_sync_.write(IpcSync::Side::Arm9, next, irq7_);
+        update_arm7_irq_signals();
+        return;
+    }
+    if (addr == IO_IPCSYNC + 1u) {
+        const u16 cur = ipc_sync_.read(IpcSync::Side::Arm9);
+        const u16 next = static_cast<u16>((cur & 0x00FFu) | (static_cast<u32>(value) << 8));
+        ipc_sync_.write(IpcSync::Side::Arm9, next, irq7_);
+        update_arm7_irq_signals();
+        return;
+    }
     if (addr == 0x0400'0247u) {
         wram_ctl_.write(value);
         arm9_bus_.rebuild_shared_wram();
@@ -220,6 +257,8 @@ u32 NDS::arm7_io_read32(u32 addr) {
         return irq7_.read_ie();
     case IO_IF:
         return irq7_.read_if();
+    case IO_IPCSYNC:
+        return static_cast<u32>(ipc_sync_.read(IpcSync::Side::Arm7));
     default:
         return 0;
     }
@@ -244,6 +283,9 @@ u16 NDS::arm7_io_read16(u32 addr) {
     if (addr == IO_IF + 2u) {
         return static_cast<u16>((irq7_.read_if() >> 16) & 0xFFFFu);
     }
+    if (addr == IO_IPCSYNC) {
+        return ipc_sync_.read(IpcSync::Side::Arm7);
+    }
     return 0;
 }
 
@@ -261,6 +303,12 @@ u8 NDS::arm7_io_read8(u32 addr) {
     if (addr >= IO_IF && addr < IO_IF + 4u) {
         const u32 shift = (addr - IO_IF) * 8u;
         return static_cast<u8>((irq7_.read_if() >> shift) & 0xFFu);
+    }
+    if (addr == IO_IPCSYNC) {
+        return static_cast<u8>(ipc_sync_.read(IpcSync::Side::Arm7) & 0xFFu);
+    }
+    if (addr == IO_IPCSYNC + 1u) {
+        return static_cast<u8>((ipc_sync_.read(IpcSync::Side::Arm7) >> 8) & 0xFFu);
     }
     return 0;
 }
@@ -282,6 +330,10 @@ void NDS::arm7_io_write32(u32 addr, u32 value) {
         break;
     case IO_SOUNDBIAS:
         soundbias_ = static_cast<u16>(value & 0x3FFu);
+        break;
+    case IO_IPCSYNC:
+        ipc_sync_.write(IpcSync::Side::Arm7, static_cast<u16>(value & 0xFFFFu), irq9_);
+        update_arm9_irq_signals();
         break;
     default:
         break;
@@ -327,6 +379,11 @@ void NDS::arm7_io_write16(u32 addr, u16 value) {
         soundbias_ = static_cast<u16>(value & 0x3FFu);
         return;
     }
+    if (addr == IO_IPCSYNC) {
+        ipc_sync_.write(IpcSync::Side::Arm7, value, irq9_);
+        update_arm9_irq_signals();
+        return;
+    }
 }
 
 void NDS::arm7_io_write8(u32 addr, u8 value) {
@@ -367,6 +424,21 @@ void NDS::arm7_io_write8(u32 addr, u8 value) {
         const u32 shift = (addr - IO_IF) * 8u;
         irq7_.write_if(static_cast<u32>(value) << shift);
         update_arm7_irq_signals();
+        return;
+    }
+    // IPCSYNC byte writes: see ARM9 path above.
+    if (addr == IO_IPCSYNC) {
+        const u16 cur = ipc_sync_.read(IpcSync::Side::Arm7);
+        const u16 next = static_cast<u16>((cur & 0xFF00u) | value);
+        ipc_sync_.write(IpcSync::Side::Arm7, next, irq9_);
+        update_arm9_irq_signals();
+        return;
+    }
+    if (addr == IO_IPCSYNC + 1u) {
+        const u16 cur = ipc_sync_.read(IpcSync::Side::Arm7);
+        const u16 next = static_cast<u16>((cur & 0x00FFu) | (static_cast<u32>(value) << 8));
+        ipc_sync_.write(IpcSync::Side::Arm7, next, irq9_);
+        update_arm9_irq_signals();
         return;
     }
 }
