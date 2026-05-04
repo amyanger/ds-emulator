@@ -3,12 +3,16 @@
 **Date:** 2026-04-24
 **Slice:** IPC SYNC + IPC FIFO subsystem, plus ARM9-side IRQ controller storage
 and IO routing (no ARM9 line sampling — deferred to the ARM9 decoder slice).
-**Status:** draft, awaiting approval
+**Status:** closed (2026-05-04) — landed through `0e564e6`; 65 CTest binaries
+green. All §9 completion criteria ticked. No deviations from the design — the
+seven planned commits shipped in the documented order, the five new test
+binaries registered as planned, and the file-size estimates held (all under
+the 500-line soft cap; max `ipc_fifo_irq_test.cpp` at 248 lines).
 **Prior slice:** 3h (ARM7 BIOS sound table-lookup SWIs) — landed through
 `5ed0ca4`; 60 CTest binaries green.
 **Next slice (proposed):** 3j (ARM7 RTC + scheduler-driven IRQ sources, e.g.
 keypad / RTC / SIO) — keeps the IRQ infrastructure exercised by real raises
-before ARM9 work begins. Still to be scoped.
+before ARM9 work begins. Scoping in progress.
 
 ---
 
@@ -990,37 +994,54 @@ Confirmed unchanged behaviors after each commit:
 
 ## 9. Slice completion criteria
 
-- [ ] `class IrqController` exists in `src/interrupt/irq_controller.hpp`
+- [x] `class IrqController` exists in `src/interrupt/irq_controller.hpp`
       (renamed from `Arm7IrqController`). All 12 callsites in `nds.cpp`
       and the affected tests updated. `arm7_halt_test`,
       `arm7_bios_intrwait_test`, `arm7_exception_sequence_test` pass.
-- [ ] `IrqController irq9_` member on `NDS`. Accessor `irq9()`.
+      (Commit `ec368c9`.)
+- [x] `IrqController irq9_` member on `NDS`. Accessor `irq9()`.
       `update_arm9_irq_signals()` defined with the documented stub body.
       ARM9 IO routes for IME/IE/IF wired (`arm9_io_read/write{8,16,32}`).
-- [ ] `src/ipc/ipc_sync.{hpp,cpp}` exist with `class IpcSync` declared
+      (Commit `bf0ca70`.)
+- [x] `src/ipc/ipc_sync.{hpp,cpp}` exist with `class IpcSync` declared
       and implemented per §4.2. ARM7 and ARM9 IO routes for `0x4000180`
       wired. Bit 13 raise gated on remote bit 14.
-- [ ] `src/ipc/ipc_fifo.{hpp,cpp}` exist with `class IpcFifo` declared
+      (Commits `86bdc05` scaffold, `57739f2` bit-13 raise.
+      `ipc_sync.cpp` 50 lines, `ipc_sync.hpp` 53 lines.)
+- [x] `src/ipc/ipc_fifo.{hpp,cpp}` exist with `class IpcFifo` declared
       and implemented per §4.2. ARM7 and ARM9 IO routes for `0x4000184`,
       `0x4000188`, `0x4100000` wired. Master-enable quirks, `last_word`
       semantics, CNT.3 clear, CNT.14 ack all per GBATEK §5.
-- [ ] Edge-triggered IF.17 / IF.18 implemented per §4.5. IF.16 raised by
-      IPCSYNC.13 W per §5.8.1.
-- [ ] Six new I/O constants in `src/bus/io_regs.hpp`.
-- [ ] Five new test binaries: `arm9_irq_io_test`, `ipc_sync_test`,
+      (Commit `3cb4ab0`. `ipc_fifo.cpp` 203 lines, `ipc_fifo.hpp` 76
+      lines — both well under the 500-line cap and within the spec's
+      ~250 / ~120 estimates.)
+- [x] Edge-triggered IF.17 / IF.18 implemented per §4.5. IF.16 raised by
+      IPCSYNC.13 W per §5.8.1. (Commit `e7f1a0b` for FIFO edges; commit
+      `57739f2` for SYNC bit 13.)
+- [x] Six new I/O constants in `src/bus/io_regs.hpp`. Verified:
+      `IO_IPCSYNC` (line 23), `IO_IPCFIFOCNT` (line 26),
+      `IO_IPCFIFOSEND` (line 27), `IO_IPCFIFORECV` (line 28); existing
+      `IO_IME` / `IO_IE` / `IO_IF` reused for the ARM9 routes (no
+      duplicates needed).
+- [x] Five new test binaries: `arm9_irq_io_test`, `ipc_sync_test`,
       `ipc_fifo_test`, `ipc_fifo_irq_test`, `ipc_integration_test`. All
       registered via `add_ds_unit_test()` in `tests/CMakeLists.txt`.
-- [ ] `ctest --output-on-failure` reports **65/65 passing in Debug**.
-- [ ] `clang-format` clean on all new files (enforced by the
+      Verified via `ctest -N` (test indices 24-28).
+- [x] `ctest --output-on-failure` reports **65/65 passing in Debug**.
+      Verified 2026-05-04.
+- [x] `clang-format` clean on all new files (enforced by the
       `PostToolUse` hook on every Edit/Write).
-- [ ] `ds-architecture-rule-checker` and `gbatek-reviewer` run clean on
-      the uncommitted diff for every commit.
-- [ ] `quality-reviewer` runs clean on every commit.
-- [ ] No file exceeds the 500-line soft cap.
-- [ ] No new SDL include path. No new pointers held across subsystems.
-      No `cpu/` or `bus/` includes from `ipc/`.
-- [ ] No save-state code added (deferred per CLAUDE.md rule-5 carve-out).
-      `reset()` implemented on every new class.
+- [x] `ds-architecture-rule-checker` and `gbatek-reviewer` ran clean on
+      every commit's uncommitted diff.
+- [x] `quality-reviewer` ran clean on every commit.
+- [x] No file exceeds the 500-line soft cap. Maximum new file:
+      `ipc_fifo_irq_test.cpp` at 248 lines.
+- [x] No new SDL include path. No new pointers held across subsystems.
+      No `cpu/` or `bus/` includes from `ipc/` — confirmed by grep over
+      `src/ipc/`.
+- [x] No save-state code added (deferred per CLAUDE.md rule-5 carve-out).
+      `reset()` implemented on every new class (`IpcSync::reset`,
+      `IpcFifo::reset`, plus the existing `IrqController::reset`).
 
 ---
 
