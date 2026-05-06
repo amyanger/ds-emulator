@@ -37,6 +37,7 @@ void NDS::reset() {
     irq7_.reset();
     ipc_sync_.reset();
     ipc_fifo_.reset();
+    rtc_.reset();
     // After reset IME/IE/IF are all zero on both sides so each line is false.
     // Push the signals explicitly so state is consistent even if a future
     // refactor reorders the controller resets relative to the CPU resets.
@@ -297,6 +298,10 @@ void NDS::update_arm9_irq_signals() {
     arm9_irq_line_cached_ = irq9_.line();
 }
 
+void NDS::seed_rtc_from_host_time(u16 year, u8 month, u8 day, u8 dow, u8 hh, u8 mm, u8 ss) {
+    rtc_.seed(Rtc::DateTime{year, month, day, dow, hh, mm, ss});
+}
+
 u32 NDS::arm7_io_read32(u32 addr) {
     switch (addr) {
     case IO_IME:
@@ -313,6 +318,11 @@ u32 NDS::arm7_io_read32(u32 addr) {
         return 0;
     case IO_IPCFIFORECV:
         return ipc_fifo_.read_recv(IpcFifo::Side::Arm7, irq9_, irq7_);
+    case IO_RTC:
+        // RTC is a 1-byte register; word reads return pins_ in the low byte
+        // with the upper bytes zero. Real hardware open-buses the upper bytes;
+        // returning zero is safe and matches our other narrow registers.
+        return static_cast<u32>(rtc_.read_pins());
     default:
         return 0;
     }
@@ -343,6 +353,11 @@ u16 NDS::arm7_io_read16(u32 addr) {
     if (addr == IO_IPCFIFOCNT) {
         return ipc_fifo_.read_cnt(IpcFifo::Side::Arm7);
     }
+    if (addr == IO_RTC) {
+        // Halfword read of the 1-byte RTC register: pins_ in the low byte,
+        // upper byte zero. Mirrors the word path above.
+        return static_cast<u16>(rtc_.read_pins());
+    }
     return 0;
 }
 
@@ -372,6 +387,9 @@ u8 NDS::arm7_io_read8(u32 addr) {
     }
     if (addr == IO_IPCFIFOCNT + 1u) {
         return static_cast<u8>((ipc_fifo_.read_cnt(IpcFifo::Side::Arm7) >> 8) & 0xFFu);
+    }
+    if (addr == IO_RTC) {
+        return rtc_.read_pins();
     }
     return 0;
 }
@@ -407,6 +425,11 @@ void NDS::arm7_io_write32(u32 addr, u32 value) {
         ipc_fifo_.write_send(IpcFifo::Side::Arm7, value, irq9_, irq7_);
         update_arm9_irq_signals();
         update_arm7_irq_signals();
+        break;
+    case IO_RTC:
+        // Word write to the 1-byte RTC register: only the low byte hits the
+        // pins; upper bytes are reserved and discarded.
+        rtc_.write_pins(static_cast<u8>(value & 0xFFu));
         break;
     default:
         break;
@@ -461,6 +484,12 @@ void NDS::arm7_io_write16(u32 addr, u16 value) {
         ipc_fifo_.write_cnt(IpcFifo::Side::Arm7, value, irq9_, irq7_);
         update_arm9_irq_signals();
         update_arm7_irq_signals();
+        return;
+    }
+    if (addr == IO_RTC) {
+        // Halfword write to the 1-byte RTC register: low byte drives pins,
+        // upper byte is reserved.
+        rtc_.write_pins(static_cast<u8>(value & 0xFFu));
         return;
     }
 }
@@ -534,6 +563,10 @@ void NDS::arm7_io_write8(u32 addr, u8 value) {
         ipc_fifo_.write_cnt(IpcFifo::Side::Arm7, next, irq9_, irq7_);
         update_arm9_irq_signals();
         update_arm7_irq_signals();
+        return;
+    }
+    if (addr == IO_RTC) {
+        rtc_.write_pins(value);
         return;
     }
 }

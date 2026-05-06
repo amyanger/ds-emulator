@@ -38,6 +38,7 @@ add_library(ds_core STATIC
     cpu/arm7/arm7_thumb_branch.cpp
     ipc/ipc_fifo.cpp
     ipc/ipc_sync.cpp
+    rtc/rtc.cpp
 )
 target_include_directories(ds_core
     PUBLIC  ${CMAKE_SOURCE_DIR}/include

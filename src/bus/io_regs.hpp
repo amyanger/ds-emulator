@@ -27,4 +27,8 @@ constexpr u32 IO_IPCFIFOCNT = 0x04000184u;
 constexpr u32 IO_IPCFIFOSEND = 0x04000188u;
 constexpr u32 IO_IPCFIFORECV = 0x04100000u;
 
+// Real-time clock (NDS7 only — ARM9 has no mapping, reads are open-bus).
+// Bit-banged SIO bus for the S-35190A; pin layout is documented in src/rtc/rtc.hpp.
+constexpr u32 IO_RTC = 0x04000138u;
+
 } // namespace ds

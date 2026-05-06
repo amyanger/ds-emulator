@@ -9,6 +9,7 @@
 #include "interrupt/irq_controller.hpp"
 #include "ipc/ipc_fifo.hpp"
 #include "ipc/ipc_sync.hpp"
+#include "rtc/rtc.hpp"
 #include "scheduler/event.hpp"
 #include "scheduler/scheduler.hpp"
 
@@ -24,6 +25,11 @@ public:
     void run_frame();
 
     void reset();
+
+    // Inject host wall-clock time into the RTC. Frontend calls before
+    // run_frame(); tests pass fixed timestamps for determinism. libds_core
+    // never calls into <chrono> on its own — the seed comes from outside.
+    void seed_rtc_from_host_time(u16 year, u8 month, u8 day, u8 dow, u8 hh, u8 mm, u8 ss);
 
     Scheduler& scheduler() { return scheduler_; }
     Arm9& cpu9() { return cpu9_; }
@@ -45,6 +51,11 @@ public:
 
     // Test/debug accessor for the IPC FIFO. Same caveat.
     IpcFifo& ipc_fifo() { return ipc_fifo_; }
+
+    // Test/debug accessor for the RTC. NOT for cross-subsystem use — same
+    // caveat as ipc_fifo()/ipc_sync(). Subsystems must never reach through
+    // NDS to pull on another subsystem's state.
+    Rtc& rtc() { return rtc_; }
 
     // Cached ARM9 IRQ line bool. Recomputed on every IME/IE/IF write because
     // the ARM9 stub has no set_irq_line(); when the ARM9 decoder lands this
@@ -111,6 +122,7 @@ private:
     IrqController irq7_{};
     IpcSync ipc_sync_{};
     IpcFifo ipc_fifo_{};
+    Rtc rtc_{};
     u16 soundbias_ = 0x0200u;
 };
 
