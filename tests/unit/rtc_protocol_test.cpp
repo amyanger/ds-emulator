@@ -1,8 +1,8 @@
 // Exercises the RTC SIO bit-bang state machine: pin round-trip, /CS framing,
 // /SCK rising-edge shift (LSB-first), command-byte fixed-bit validation, and
-// SIO direction-bit handling. Slice 3j commit 2 — byte-boundary work in
-// Param phase is still stubbed, so all assertions probe the public surface
-// (read_pins) which is the only observable proof that decode succeeded.
+// SIO direction-bit handling. Assertions probe via read_pins(); for read-
+// direction transfers the chip drives Status1 (= 0x02 post-reset), so bit 0
+// at bit_idx_=0 is 0 and bit 0 at bit_idx_=1 is 1.
 
 #include "require.hpp"
 #include "rtc/rtc.hpp"
@@ -101,14 +101,15 @@ static void Rtc_CsFalling_AbortsTransfer() {
     drop_cs(r);
 
     // New transfer: Read Status1 = 0x70 (bits 5..7=110, R/W=1, idx=0).
+    // produce_read_byte loads shift_byte_ = status1_ = 0x02 at the
+    // Command→Param transition. Drive one /SCK rising with the chip
+    // driving SIO (dir = 0). bit_idx_ advances to 1; chip-driven bit is
+    // bit 1 of 0x02 = 1. A failed abort would leave shift_byte_ corrupted
+    // and produce a different bit.
     assert_cs_high(r);
     clock_byte_in(r, 0x70u, true);
-
-    // Now in Param phase, read direction. Drive one /SCK rising with the
-    // chip driving SIO (dir = 0). The chip-driven bit (shift_byte_ bit 0)
-    // is 0 in commit 2 because produce_read_byte() isn't wired yet.
     clock_bit_in(r, 0u, false);
-    REQUIRE((r.read_pins() & 0x01u) == 0u);
+    REQUIRE((r.read_pins() & 0x01u) == 1u);
 }
 
 // Case 5: /SCK rising shifts one bit per edge, LSB-first. Build the byte
@@ -130,10 +131,10 @@ static void Rtc_SckRisingEdge_ShiftsOneBit_LSBFirst() {
 
 // Case 6: a bad command byte must not poison a subsequent valid transfer.
 // Send 0x55 (fixed-bits check fails), then /CS toggle and 0x70 (Read
-// Status1). The chip-driven bit-0 replacement firing on the second
-// transfer proves the new decode succeeded despite the prior failure.
-// (Case 5 already covers the "bad byte alone leaves state untouched"
-// invariant; this case is specifically the recovery path.)
+// Status1). The chip drives Status1 = 0x02 on the recovery transfer; bit 1
+// of 0x02 is 1, so after one /SCK rising in Param-phase read direction we
+// observe bit 0 of read_pins = 1. (Case 5 already covers the "bad byte
+// alone leaves state untouched" invariant; this case is the recovery path.)
 static void Rtc_CommandByte_FixedHighBitsValidated() {
     Rtc r;
     r.reset();
@@ -143,7 +144,7 @@ static void Rtc_CommandByte_FixedHighBitsValidated() {
     assert_cs_high(r);
     clock_byte_in(r, 0x70u, true); // good: Read Status1
     clock_bit_in(r, 0u, false);    // Param-phase /SCK with chip driving
-    REQUIRE((r.read_pins() & 0x01u) == 0u);
+    REQUIRE((r.read_pins() & 0x01u) == 1u);
 }
 
 // Case 7: bit 4 of the pins register (SIO direction) governs who drives
@@ -165,15 +166,20 @@ static void Rtc_DataDirectionBit4_GovernsSioDirection() {
     }
 
     // Part 2: chip drives SIO during Param phase. After Read Status1 (0x70),
-    // a Param-phase /SCK rising with bit 4 = 0 means the chip is master.
-    // shift_byte_ is 0 in commit 2, so chip-driven bit-0 is 0.
+    // produce_read_byte loads shift_byte_ = 0x02. Sample at bit_idx_=0
+    // (chip presents bit 0 of 0x02 = 0); after one /SCK rising bit_idx_=1
+    // and the chip presents bit 1 of 0x02 = 1. The pair of assertions
+    // proves the chip is sourcing real Status1 bits LSB-first, not a
+    // stuck-at-zero shift register.
     {
         Rtc r;
         r.reset();
         assert_cs_high(r);
-        clock_byte_in(r, 0x70u, true); // Read Status1
-        clock_bit_in(r, 0u, false);    // chip drives SIO
-        REQUIRE((r.read_pins() & 0x01u) == 0u);
+        clock_byte_in(r, 0x70u, true);                                // Read Status1
+        r.write_pins(static_cast<u8>(kDirChipDrivesSio | (1u << 2))); // /SCK low, chip drives
+        REQUIRE((r.read_pins() & 0x01u) == 0u);                       // bit 0 of 0x02
+        clock_bit_in(r, 0u, false);                                   // /SCK rising
+        REQUIRE((r.read_pins() & 0x01u) == 1u);                       // bit 1 of 0x02
     }
 }
 

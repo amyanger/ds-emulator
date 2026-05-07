@@ -102,6 +102,15 @@ void Rtc::write_pins(u8 value) {
                 // Seiko S-35190A datasheet — this decoder will need a melonDS-
                 // style auto-detect before HG/SS can complete an RTC handshake.
                 // Tests today drive the spec's chosen convention directly.
+                //
+                // The bit-numbering question also implicates the opcode→Cmd
+                // mapping below: under GBATEK's literal Fwd table, opcode 6 =
+                // Time-only (hh,mm,ss), opcode 7 = Free, opcode 3 = clock-
+                // adjustment, and the "Date-only" command does not exist.
+                // The slice spec's mapping (opcode 6 = Date, opcode 0xA =
+                // Time, etc.) follows the S-35190A datasheet's MSB-first
+                // byte view. Both decisions resolve together — auto-detect
+                // bit-numbering + reconcile opcode table — before HG/SS.
                 if ((shift_byte_ & 0xE0u) != 0x60u) {
                     DS_LOG_WARN(
                         "rtc: command byte 0x%02X has invalid fixed bits 5..7 (expected 110b)",
@@ -145,33 +154,47 @@ void Rtc::write_pins(u8 value) {
                     xfer_phase_ = Phase::Param;
                     param_byte_ = 0;
                 }
-                shift_byte_ = 0;
+                // Read direction: load the first parameter byte for the
+                // chip-output path. Write direction: shift_byte_ accumulates
+                // the incoming byte from bit 0 up.
+                shift_byte_ =
+                    (active_read_ && active_cmd_ != Cmd::Unknown) ? produce_read_byte() : 0u;
             } else { // Phase::Param
-                // Commit-2 stub: byte-boundary work belongs in commits 3/4.
-                // TODO(slice-3j-commit-3): wire produce_read_byte()
-                // TODO(slice-3j-commit-4): wire apply_write_byte(shift_byte_)
-                //
-                // Wiring hazard for commits 3/4 — bit_idx_ ordering on read:
-                // bit_idx_ is incremented on every /SCK rising (above) before
-                // the CPU has a chance to sample the line. read_pins() reads
-                // (shift_byte_ >> bit_idx_) & 1, which means the CPU sees the
-                // bit at the post-increment index, not the just-clocked bit.
-                // For LSB-first read commands, produce_read_byte() must either
-                // (a) preload shift_byte_ such that bit (bit_idx_) is the next
-                // outgoing bit at all times (i.e. shift down by 1 after every
-                // /SCK rising), or (b) drive the chip-output bit on /SCK
-                // falling rather than rising, so the CPU samples a stable
-                // value during the high half-cycle. Per GBATEK §5.2 ("Output
-                // /SCK = HIGH ... then read SIO"), real CPU timing samples
-                // after the rising edge — option (a) is the simpler fit.
-                //
-                // Wiring hazard for commit 3 — param_byte_ wrap: this counter
-                // is u8 and increments unbounded if a buggy/malicious ROM
-                // holds /CS high and clocks past the per-command max. The
-                // commit-3 dispatcher must clamp at max_bytes_for(active_cmd_)
-                // rather than wrapping at 255.
-                shift_byte_ = 0;
-                ++param_byte_;
+                if (active_read_) {
+                    // Status1 auto-clear: bits 4..7 are read-only flags that
+                    // clear when the CPU completes a Status1 read. Spec §5.4
+                    // places the clear "at the moment the last bit of the
+                    // byte is shifted out" — exactly here, after the 8th
+                    // /SCK rising for the byte the CPU just read. Only fires
+                    // on a *complete* read of byte 0; a /CS abort mid-byte
+                    // never reaches this code path.
+                    if (active_cmd_ == Cmd::Status1 && param_byte_ == 0u) {
+                        status1_ &= 0x0Fu;
+                    }
+                } else {
+                    // TODO(slice-3j-commit-4): wire apply_write_byte(shift_byte_).
+                    // For commit 3, write-direction byte boundaries are still
+                    // a stub — the byte is silently discarded.
+                }
+
+                // Saturating advance — clamp at max so a buggy ROM clocking
+                // past max-byte-count cannot wrap u8 back to 0 and silently
+                // replay byte 0.
+                const u8 max = max_bytes_for(active_cmd_);
+                if (param_byte_ < max) {
+                    ++param_byte_;
+                }
+
+                // Read direction: load the next byte's chip-output value if
+                // more bytes remain in this command. Over-clock past max
+                // leaves shift_byte_ unchanged (last byte's bits keep
+                // echoing — open-bus-equivalent).
+                if (active_read_ && active_cmd_ != Cmd::Unknown && param_byte_ < max) {
+                    shift_byte_ = produce_read_byte();
+                } else if (!active_read_) {
+                    // Write direction: clear accumulator for the next byte.
+                    shift_byte_ = 0;
+                }
             }
         }
     }
@@ -248,8 +271,67 @@ u8 Rtc::days_in_month(u16 year, u8 month) {
 
 void Rtc::apply_write_byte(u8 /*byte*/) {}
 
+u8 Rtc::datetime_byte(u8 idx) const {
+    // Per spec §5.6: 7-byte BCD-encoded sequence Year, Month, Day, DoW, Hour,
+    // Min, Sec. Year stores year-2000 in BCD, so it wraps at 99→00 — past
+    // year 2099 the chip silently rolls over, matching real-hardware
+    // S-35190A behavior.
+    switch (idx) {
+    case 0u:
+        return to_bcd(static_cast<u8>(dt_.year % 100u)); // year-2000 BCD; wraps past 2099
+    case 1u:
+        return to_bcd(dt_.month);
+    case 2u:
+        return to_bcd(dt_.day);
+    case 3u:
+        return dt_.dow; // raw 0..6, single nibble — no BCD encoding
+    case 4u:
+        return to_bcd(dt_.hour); // 24-hour mode (status1 bit 1 default 1)
+    case 5u:
+        return to_bcd(dt_.min);
+    case 6u:
+        return to_bcd(dt_.sec);
+    default:
+        return 0u;
+    }
+}
+
 u8 Rtc::produce_read_byte() {
-    return 0u;
+    // Pure function — must not mutate. Status1's auto-clear of bits 4..7 on
+    // read is performed in write_pins()'s byte-end block, gated on a
+    // *complete* byte read, not here.
+    switch (active_cmd_) {
+    case Cmd::Status1:
+        return status1_;
+    case Cmd::Status2:
+        return status2_;
+    case Cmd::DateTime:
+        return datetime_byte(param_byte_); // indices 0..6
+    case Cmd::Date:
+        return datetime_byte(param_byte_); // indices 0..2
+    case Cmd::Time:
+        return datetime_byte(static_cast<u8>(param_byte_ + 4u)); // indices 4..6
+    // Alarm reads: param_byte_ is 0..2 by the call-site guard
+    // (`param_byte_ < max_bytes_for(Alarm*) == 3`). Use `% 3u` to encode
+    // the bound directly so a future call-site change cannot OOB.
+    case Cmd::Alarm1: {
+        const u8 fields[3] = {alarm1_.dow, alarm1_.hour, alarm1_.min};
+        return fields[param_byte_ % 3u];
+    }
+    case Cmd::Alarm2: {
+        const u8 fields[3] = {alarm2_.dow, alarm2_.hour, alarm2_.min};
+        return fields[param_byte_ % 3u];
+    }
+    case Cmd::Free:
+    case Cmd::FreqSel:
+        DS_LOG_WARN("rtc: read of unimplemented register (cmd=%d)", static_cast<int>(active_cmd_));
+        return 0u;
+    case Cmd::Unknown:
+    default:
+        DS_LOG_WARN("rtc: produce_read_byte() invoked with Cmd::Unknown — "
+                    "state machine invariant violated");
+        return 0u;
+    }
 }
 
 bool Rtc::alarm_matches(const Alarm& /*a*/) const {

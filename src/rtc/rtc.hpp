@@ -118,8 +118,32 @@ private:
     static u8 days_in_month(u16 year, u8 month);
     static bool is_leap(u16 year);
 
+    // Per-command parameter byte count. Defined inline so the constexpr is
+    // fully visible at every call site (the saturating advance in write_pins
+    // depends on this folding to a constant).
+    static constexpr u8 max_bytes_for(Cmd c) {
+        switch (c) {
+        case Cmd::Status1:
+        case Cmd::Status2:
+        case Cmd::Free:
+        case Cmd::FreqSel:
+            return 1u;
+        case Cmd::Date:
+        case Cmd::Time:
+        case Cmd::Alarm1:
+        case Cmd::Alarm2:
+            return 3u;
+        case Cmd::DateTime:
+            return 7u;
+        case Cmd::Unknown:
+        default:
+            return 0u;
+        }
+    }
+
     void apply_write_byte(u8 byte);
     u8 produce_read_byte();
+    u8 datetime_byte(u8 idx) const;
     bool alarm_matches(const Alarm& a) const;
 };
 
