@@ -772,6 +772,34 @@ slice.
 
 [gbatek-2026-05-04]
 
+**Open question — bit-numbering convention (added 2026-05-07 during
+commit-2 review):** GBATEK's "Command Register" entry presents the byte
+layout in two side-by-side columns ("Fwd" = LSB-first wire order, "Rev" =
+MSB-first wire order). Read literally under "Fwd", the fixed pattern
+sits in bits 0..3 of the received byte (low nibble = `0x06`), the command
+index is a 3-bit field in bits 4..6, and R/W is bit 7. The table above
+uses the Seiko S-35190A datasheet's MSB-first byte layout — fixed pattern
+in bits 5..7, R/W in bit 4, 4-bit command index in bits 0..3 (allowing
+`0xA` for Time-read).
+
+Both layouts can encode the same set of valid commands; they differ only
+in where the fields sit within the u8 representation. melonDS handles
+both wire forms by detecting an MSB-first command (`(val & 0xF0) == 0x60`
+matches the slice-spec layout exactly) and bit-reversing into a canonical
+LSB-first form before its switch. The slice-3j commits 2-7 implement the
+spec's MSB-first layout literally; before HG/SS can complete an RTC
+handshake, the decoder will need either:
+
+1. A melonDS-style auto-detect + bit-reverse step (handles both wire
+   conventions), OR
+2. A confirmation via instruction trace that real Pokemon ROMs send the
+   spec's MSB-first byte layout directly, in which case no change is
+   needed.
+
+Tracked in the implementation via a `TODO(slice-3j-real-game-integration)`
+marker at `src/rtc/rtc.cpp` adjacent to the fixed-bits check. Resolution
+deferred to whichever later slice first integrates an HG/SS RTC trace.
+
 ### 5.4 Status Register 1 (1 byte, both read and write commands)
 
 | Bit | Meaning                                                  | Read clears? |
