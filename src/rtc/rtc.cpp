@@ -172,9 +172,11 @@ void Rtc::write_pins(u8 value) {
                         status1_ &= 0x0Fu;
                     }
                 } else {
-                    // TODO(slice-3j-commit-4): wire apply_write_byte(shift_byte_).
-                    // For commit 3, write-direction byte boundaries are still
-                    // a stub — the byte is silently discarded.
+                    // Write direction: dispatch the freshly-shifted byte to the active
+                    // command's field. Must run BEFORE the saturating param_byte_ advance
+                    // below so apply_write_byte() sees the index of the byte that was
+                    // just received (0 = first param byte, 1 = second, ...).
+                    apply_write_byte(shift_byte_);
                 }
 
                 // Saturating advance — clamp at max so a buggy ROM clocking
@@ -269,7 +271,71 @@ u8 Rtc::days_in_month(u16 year, u8 month) {
 
 // ---- Stubs ----
 
-void Rtc::apply_write_byte(u8 /*byte*/) {}
+void Rtc::apply_write_byte(u8 byte) {
+    switch (active_cmd_) {
+    case Cmd::Status1:
+        // Bits 0..3 are R/W (Reset W-only, 12/24h R/W, GP1/GP2 R/W). Bits
+        // 4..7 are R-only flags set by tick() and cleared by a complete
+        // read. Preserve the upper nibble verbatim so a Status1 write
+        // cannot stomp an alarm-fired flag the CPU has not yet seen.
+        status1_ = static_cast<u8>((status1_ & 0xF0u) | (byte & 0x0Fu));
+        return;
+    case Cmd::Status2:
+        // All 8 bits R/W per GBATEK (including bit 7 "Test Mode, don't use").
+        // Stored verbatim; we don't model test-mode behavior.
+        status2_ = byte;
+        return;
+    case Cmd::Alarm1:
+        switch (param_byte_) {
+        case 0u:
+            alarm1_.dow = byte;
+            return;
+        case 1u:
+            alarm1_.hour = byte;
+            return;
+        case 2u:
+            alarm1_.min = byte;
+            return;
+        default:
+            return; // over-clock guarded by saturating advance
+        }
+    case Cmd::Alarm2:
+        switch (param_byte_) {
+        case 0u:
+            alarm2_.dow = byte;
+            return;
+        case 1u:
+            alarm2_.hour = byte;
+            return;
+        case 2u:
+            alarm2_.min = byte;
+            return;
+        default:
+            return;
+        }
+    case Cmd::DateTime:
+    case Cmd::Date:
+    case Cmd::Time:
+        DS_LOG_WARN("rtc: write to read-only command (cmd=%d)", static_cast<int>(active_cmd_));
+        return;
+    case Cmd::Free:
+    case Cmd::FreqSel:
+        DS_LOG_WARN("rtc: write to unimplemented register (cmd=%d)", static_cast<int>(active_cmd_));
+        return;
+    case Cmd::Unknown:
+    default:
+        // Reachable: a write-direction command byte with valid fixed bits
+        // 5..7 but an unrecognized low nibble (opcodes 0x8/0x9/0xB-0xF)
+        // sets active_cmd_=Unknown AND advances to Param phase, so write
+        // bytes land here. Read-side preload is guarded by
+        // `active_cmd_ != Unknown`; the write-side intentionally lets the
+        // ROM finish its transfer to /CS deassert without stalling. Bytes
+        // are silently discarded with a warn-log.
+        DS_LOG_WARN("rtc: apply_write_byte() with Cmd::Unknown — discarding "
+                    "byte from write to unrecognized opcode");
+        return;
+    }
+}
 
 u8 Rtc::datetime_byte(u8 idx) const {
     // Per spec §5.6: 7-byte BCD-encoded sequence Year, Month, Day, DoW, Hour,

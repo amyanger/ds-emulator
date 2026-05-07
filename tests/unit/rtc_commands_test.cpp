@@ -221,6 +221,105 @@ static void Rtc_ReadDateTime_BitIdxNoSkew_FirstBitIsLsb() {
     r.write_pins(static_cast<u8>(kDirChipDrivesSio | (1u << 2) | (1u << 1)));
 }
 
+// Case 10: Status1 writes affect bits 0..3 only; bits 4..7 (R-only flags)
+// are preserved across the write. Post-reset status1_ = 0x02 (bit 1 set).
+// Writing 0xFF stores 0x0F in the lower nibble and keeps the upper nibble
+// at 0 (no flags set in commit 4 — flag-raise is commit 6).
+static void Rtc_WriteStatus1_PreservesReservedBits() {
+    Rtc r;
+    r.reset();
+    REQUIRE(r.status1() == 0x02u);
+
+    assert_cs_high(r);
+    clock_byte_in(r, 0x60u, true); // Write Status1 = 0x60 | 0x00 R/W=W | 0x0 cmd
+    clock_byte_in(r, 0xFFu, true); // Param byte: write 0xFF
+    REQUIRE(r.status1() == 0x0Fu); // bits 0..3 = 0xF, bits 4..7 = 0 (preserved)
+    drop_cs(r);
+}
+
+// Case 11: Status2 stores all 8 bits verbatim, including bit 7.
+static void Rtc_WriteStatus2_StoresAllBits() {
+    Rtc r;
+    r.reset();
+    REQUIRE(r.status2() == 0x00u);
+
+    assert_cs_high(r);
+    clock_byte_in(r, 0x64u, true); // Write Status2 = 0x60 | cmd 0x4
+    clock_byte_in(r, 0x44u, true); // Alarm-1 enable (bits 0..3 = 0100b) + INT2 enable (bit 6)
+    REQUIRE(r.status2() == 0x44u);
+    drop_cs(r);
+
+    // Second write to confirm bit 7 also stores.
+    assert_cs_high(r);
+    clock_byte_in(r, 0x64u, true);
+    clock_byte_in(r, 0x80u, true);
+    REQUIRE(r.status2() == 0x80u);
+}
+
+// Case 12: Alarm1 stores all 3 bytes (dow, hour, min) verbatim including
+// bit 7 (compare-enable).
+static void Rtc_WriteAlarm1_StoresAllThreeBytes() {
+    Rtc r;
+    r.reset();
+
+    assert_cs_high(r);
+    clock_byte_in(r, 0x61u, true); // Write Alarm1 = 0x60 | cmd 0x1
+    clock_byte_in(r, 0x82u, true); // dow byte: bit 7 set + dow=2
+    clock_byte_in(r, 0x95u, true); // hour byte: bit 7 set + 0x15 BCD
+    clock_byte_in(r, 0xB0u, true); // min byte: bit 7 set + bit 5 set + 0x10 BCD
+    drop_cs(r);
+
+    REQUIRE(r.alarm1().dow == 0x82u);
+    REQUIRE(r.alarm1().hour == 0x95u);
+    REQUIRE(r.alarm1().min == 0xB0u);
+}
+
+// Case 13: Alarm2 writes do not bleed into Alarm1 state.
+static void Rtc_WriteAlarm2_Independent() {
+    Rtc r;
+    r.reset();
+
+    assert_cs_high(r);
+    clock_byte_in(r, 0x65u, true); // Write Alarm2 = 0x60 | cmd 0x5
+    clock_byte_in(r, 0x91u, true); // bit 7 set (compare-enable) — symmetry with case 12
+    clock_byte_in(r, 0x22u, true);
+    clock_byte_in(r, 0x33u, true);
+    drop_cs(r);
+
+    REQUIRE(r.alarm2().dow == 0x91u);
+    REQUIRE(r.alarm2().hour == 0x22u);
+    REQUIRE(r.alarm2().min == 0x33u);
+    REQUIRE(r.alarm1().dow == 0u); // default-init untouched
+    REQUIRE(r.alarm1().hour == 0u);
+    REQUIRE(r.alarm1().min == 0u);
+}
+
+// Case 14: Write-direction DateTime command must NOT corrupt dt_. The slice
+// spec lists DateTime/Date/Time only in R-only rows; a write attempt is a
+// ROM bug, but the chip-side state must remain intact (just warn-log and
+// discard the bytes).
+static void Rtc_WriteDateTime_ReadOnly_Discarded() {
+    Rtc r;
+    r.reset();
+    r.seed({2026, 5, 4, 1, 14, 30, 45});
+
+    assert_cs_high(r);
+    clock_byte_in(r, 0x62u, true); // Write DateTime = 0x60 | cmd 0x2 (read-only!)
+    for (u8 i = 0; i < 7u; ++i) {
+        clock_byte_in(r, 0xAAu, true);
+    }
+    drop_cs(r);
+
+    const Rtc::DateTime dt = r.now_datetime();
+    REQUIRE(dt.year == 2026u);
+    REQUIRE(dt.month == 5u);
+    REQUIRE(dt.day == 4u);
+    REQUIRE(dt.dow == 1u);
+    REQUIRE(dt.hour == 14u);
+    REQUIRE(dt.min == 30u);
+    REQUIRE(dt.sec == 45u);
+}
+
 int main() {
     std::puts("[Rtc_ReadStatus1_DefaultIs24HourMode]");
     Rtc_ReadStatus1_DefaultIs24HourMode();
@@ -240,6 +339,16 @@ int main() {
     Rtc_ReadDateTime_OverClockReturnsLastByte();
     std::puts("[Rtc_ReadDateTime_BitIdxNoSkew_FirstBitIsLsb]");
     Rtc_ReadDateTime_BitIdxNoSkew_FirstBitIsLsb();
+    std::puts("[Rtc_WriteStatus1_PreservesReservedBits]");
+    Rtc_WriteStatus1_PreservesReservedBits();
+    std::puts("[Rtc_WriteStatus2_StoresAllBits]");
+    Rtc_WriteStatus2_StoresAllBits();
+    std::puts("[Rtc_WriteAlarm1_StoresAllThreeBytes]");
+    Rtc_WriteAlarm1_StoresAllThreeBytes();
+    std::puts("[Rtc_WriteAlarm2_Independent]");
+    Rtc_WriteAlarm2_Independent();
+    std::puts("[Rtc_WriteDateTime_ReadOnly_Discarded]");
+    Rtc_WriteDateTime_ReadOnly_Discarded();
     std::puts("OK");
     return 0;
 }
