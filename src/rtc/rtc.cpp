@@ -208,7 +208,31 @@ void Rtc::write_pins(u8 value) {
     prev_sck_high_ = (new_sck != 0u);
 }
 
-void Rtc::tick(IrqController& /*irq7*/) {}
+void Rtc::tick(IrqController& /*irq7*/) {
+    // irq7 is unused while alarm raises are deferred but kept in the
+    // signature so adding the rising-edge raise is a pure body change.
+    // DoW advances only on day rollover and runs independently of month/year
+    // boundaries. days_in_month() returns 0 for months 0/13, but month here
+    // is always 1..12 because the bump to 13 resets to 1 and increments year
+    // before any further day-bound check executes.
+    if (++dt_.sec == 60u) {
+        dt_.sec = 0u;
+        if (++dt_.min == 60u) {
+            dt_.min = 0u;
+            if (++dt_.hour == 24u) {
+                dt_.hour = 0u;
+                dt_.dow = static_cast<u8>((dt_.dow + 1u) % 7u);
+                if (++dt_.day > days_in_month(dt_.year, dt_.month)) {
+                    dt_.day = 1u;
+                    if (++dt_.month > 12u) {
+                        dt_.month = 1u;
+                        ++dt_.year;
+                    }
+                }
+            }
+        }
+    }
+}
 
 Rtc::DateTime Rtc::now_datetime() const {
     return dt_;

@@ -8,6 +8,10 @@ namespace ds {
 // PPU-derived timing lands when the PPU lands.
 static constexpr Cycle kFrameCycles = 1'120'380;
 
+// 67.027964 MHz × 1 s. Kept separate from kFrameCycles so the two can be
+// tuned independently once PPU-derived timing lands.
+static constexpr Cycle kArm9CyclesPerSecond = 67'027'964;
+
 NDS::NDS()
     : arm9_bus_(*this, main_ram_.data(), shared_wram_.data(), wram_ctl_),
       arm7_bus_(*this, main_ram_.data(), shared_wram_.data(), arm7_wram_.data(), wram_ctl_) {
@@ -38,6 +42,8 @@ void NDS::reset() {
     ipc_sync_.reset();
     ipc_fifo_.reset();
     rtc_.reset();
+    // Seed the recurring 1 Hz RTC chain; the handler self-reschedules.
+    scheduler_.schedule_in(kArm9CyclesPerSecond, EventKind::Rtc1HzTick);
     // After reset IME/IE/IF are all zero on both sides so each line is false.
     // Push the signals explicitly so state is consistent even if a future
     // refactor reorders the controller resets relative to the CPU resets.
@@ -68,6 +74,14 @@ void NDS::on_scheduler_event(const Event& ev) {
     switch (ev.kind) {
     case EventKind::FrameEnd:
         frame_done_ = true;
+        break;
+    case EventKind::Rtc1HzTick:
+        // update_arm7_irq_signals() stays wired even while tick() cannot
+        // raise — once alarm raises land, the line/halt-wake recompute must
+        // fire on the same scheduler tick that set the IF bit.
+        rtc_.tick(irq7_);
+        update_arm7_irq_signals();
+        scheduler_.schedule_in(kArm9CyclesPerSecond, EventKind::Rtc1HzTick);
         break;
     }
 }
