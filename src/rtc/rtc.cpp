@@ -30,6 +30,10 @@ void Rtc::reset() {
 
 void Rtc::seed(const DateTime& dt) {
     dt_ = dt;
+    // seed() can jump dt_ across a match boundary, so any prior prev_*_match_
+    // is meaningless; clear so the next tick re-evaluates the rising edge.
+    prev_alarm1_match_ = false;
+    prev_alarm2_match_ = false;
 }
 
 u8 Rtc::read_pins() const {
@@ -208,13 +212,12 @@ void Rtc::write_pins(u8 value) {
     prev_sck_high_ = (new_sck != 0u);
 }
 
-void Rtc::tick(IrqController& /*irq7*/) {
-    // irq7 is unused while alarm raises are deferred but kept in the
-    // signature so adding the rising-edge raise is a pure body change.
-    // DoW advances only on day rollover and runs independently of month/year
-    // boundaries. days_in_month() returns 0 for months 0/13, but month here
-    // is always 1..12 because the bump to 13 resets to 1 and increments year
-    // before any further day-bound check executes.
+void Rtc::tick(IrqController& irq7) {
+    // Calendar cascade. DoW advances only on day rollover and runs
+    // independently of month/year boundaries. days_in_month() returns 0 for
+    // months 0/13, but month here is always 1..12 because the bump to 13
+    // resets to 1 and increments year before any further day-bound check
+    // executes.
     if (++dt_.sec == 60u) {
         dt_.sec = 0u;
         if (++dt_.min == 60u) {
@@ -232,6 +235,28 @@ void Rtc::tick(IrqController& /*irq7*/) {
             }
         }
     }
+
+    // Disabled alarms force match=false and so leave prev_*_match_ at false;
+    // re-enabling an alarm mid-window therefore gets a fresh rising edge on
+    // the next tick the condition is true.
+    const bool alarm1_enabled = (status2_ & 0x0Fu) == 0x04u;
+    const bool alarm2_enabled = (status2_ & 0x40u) != 0u;
+    const bool a1_match = alarm1_enabled && alarm_matches(alarm1_);
+    const bool a2_match = alarm2_enabled && alarm_matches(alarm2_);
+
+    // Simultaneous rises produce two irq7.raise() calls into IF.7; the second
+    // is an idempotent OR. Status1 bits 4/5 latch independently and auto-clear
+    // on a complete Status1 read (§5.4).
+    if (a1_match && !prev_alarm1_match_) {
+        status1_ |= 0x10u;   // INT1 latch (status1 bit 4)
+        irq7.raise(1u << 7); // IF.7 — NDS7-only (§5.8)
+    }
+    if (a2_match && !prev_alarm2_match_) {
+        status1_ |= 0x20u; // INT2 latch (status1 bit 5)
+        irq7.raise(1u << 7);
+    }
+    prev_alarm1_match_ = a1_match;
+    prev_alarm2_match_ = a2_match;
 }
 
 Rtc::DateTime Rtc::now_datetime() const {
@@ -424,8 +449,13 @@ u8 Rtc::produce_read_byte() {
     }
 }
 
-bool Rtc::alarm_matches(const Alarm& /*a*/) const {
-    return false;
+bool Rtc::alarm_matches(const Alarm& a) const {
+    // dow is stored raw 0..6 (NOT BCD) per §5.7; hour/min are BCD on the chip
+    // side, so from_bcd before comparing against the binary dt_ fields.
+    const bool dow_ok = !(a.dow & 0x80u) || ((a.dow & 0x07u) == dt_.dow);
+    const bool hour_ok = !(a.hour & 0x80u) || (from_bcd(a.hour & 0x3Fu) == dt_.hour);
+    const bool min_ok = !(a.min & 0x80u) || (from_bcd(a.min & 0x7Fu) == dt_.min);
+    return dow_ok && hour_ok && min_ok;
 }
 
 } // namespace ds
