@@ -31,4 +31,10 @@ constexpr u32 IO_IPCFIFORECV = 0x04100000u;
 // Bit-banged SIO bus for the S-35190A; pin layout is documented in src/rtc/rtc.hpp.
 constexpr u32 IO_RTC = 0x04000138u;
 
+// KEYINPUT/KEYCNT are routed on both buses (KEYCNT has per-CPU storage).
+// EXTKEYIN is NDS7-only (ARM9 reads open-bus).
+constexpr u32 IO_KEYINPUT = 0x04000130u;
+constexpr u32 IO_KEYCNT = 0x04000132u;
+constexpr u32 IO_EXTKEYIN = 0x04000136u;
+
 } // namespace ds

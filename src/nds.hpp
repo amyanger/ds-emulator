@@ -6,6 +6,8 @@
 #include "cpu/arm7/arm7.hpp"
 #include "cpu/arm9/arm9.hpp"
 #include "ds/common.hpp"
+#include "input/keypad.hpp"
+#include "input/lid_switch.hpp"
 #include "interrupt/irq_controller.hpp"
 #include "ipc/ipc_fifo.hpp"
 #include "ipc/ipc_sync.hpp"
@@ -56,6 +58,18 @@ public:
     // caveat as ipc_fifo()/ipc_sync(). Subsystems must never reach through
     // NDS to pull on another subsystem's state.
     Rtc& rtc() { return rtc_; }
+
+    // Test/debug accessor for the keypad. Same caveat.
+    Keypad& keypad() { return keypad_; }
+
+    // Test/debug accessor for the lid switch. Same caveat.
+    LidSwitch& lid_switch() { return lid_switch_; }
+
+    // Host-injection path for KEYINPUT (frontend or test).
+    void set_keypad_state(u16 keyinput);
+
+    // Host-injection path for the lid hinge. true = closed/folded.
+    void set_lid_closed(bool closed);
 
     // Cached ARM9 IRQ line bool. Recomputed on every IME/IE/IF write because
     // the ARM9 stub has no set_irq_line(); when the ARM9 decoder lands this
@@ -123,6 +137,8 @@ private:
     IpcSync ipc_sync_{};
     IpcFifo ipc_fifo_{};
     Rtc rtc_{};
+    Keypad keypad_{};
+    LidSwitch lid_switch_{};
     u16 soundbias_ = 0x0200u;
 };
 

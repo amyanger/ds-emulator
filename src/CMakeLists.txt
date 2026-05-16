@@ -36,6 +36,8 @@ add_library(ds_core STATIC
     cpu/arm7/arm7_thumb_ls.cpp
     cpu/arm7/arm7_thumb_block.cpp
     cpu/arm7/arm7_thumb_branch.cpp
+    input/keypad.cpp
+    input/lid_switch.cpp
     ipc/ipc_fifo.cpp
     ipc/ipc_sync.cpp
     rtc/rtc.cpp

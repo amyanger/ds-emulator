@@ -42,6 +42,8 @@ void NDS::reset() {
     ipc_sync_.reset();
     ipc_fifo_.reset();
     rtc_.reset();
+    keypad_.reset();
+    lid_switch_.reset();
     // Seed the recurring 1 Hz RTC chain; the handler self-reschedules.
     scheduler_.schedule_in(kArm9CyclesPerSecond, EventKind::Rtc1HzTick);
     // After reset IME/IE/IF are all zero on both sides so each line is false.
@@ -102,6 +104,12 @@ u32 NDS::arm9_io_read32(u32 addr) {
         return 0; // W-only register
     case IO_IPCFIFORECV:
         return ipc_fifo_.read_recv(IpcFifo::Side::Arm9, irq9_, irq7_);
+    case IO_KEYINPUT:
+        // 32-bit read pairs KEYINPUT with this CPU's own KEYCNT cell.
+        return (static_cast<u32>(keypad_.read_keycnt(Keypad::Side::Arm9)) << 16) |
+               static_cast<u32>(keypad_.read_keyinput());
+    case IO_KEYCNT:
+        return static_cast<u32>(keypad_.read_keycnt(Keypad::Side::Arm9));
     default:
         return 0;
     }
@@ -128,6 +136,12 @@ u16 NDS::arm9_io_read16(u32 addr) {
     }
     if (addr == IO_IPCFIFOCNT) {
         return ipc_fifo_.read_cnt(IpcFifo::Side::Arm9);
+    }
+    if (addr == IO_KEYINPUT) {
+        return keypad_.read_keyinput();
+    }
+    if (addr == IO_KEYCNT) {
+        return keypad_.read_keycnt(Keypad::Side::Arm9);
     }
     return 0;
 }
@@ -156,6 +170,14 @@ u8 NDS::arm9_io_read8(u32 addr) {
     }
     if (addr == IO_IPCFIFOCNT + 1u) {
         return static_cast<u8>((ipc_fifo_.read_cnt(IpcFifo::Side::Arm9) >> 8) & 0xFFu);
+    }
+    if (addr >= IO_KEYINPUT && addr < IO_KEYINPUT + 2u) {
+        const u32 shift = (addr - IO_KEYINPUT) * 8u;
+        return static_cast<u8>((keypad_.read_keyinput() >> shift) & 0xFFu);
+    }
+    if (addr >= IO_KEYCNT && addr < IO_KEYCNT + 2u) {
+        const u32 shift = (addr - IO_KEYCNT) * 8u;
+        return static_cast<u8>((keypad_.read_keycnt(Keypad::Side::Arm9) >> shift) & 0xFFu);
     }
     return 0;
 }
@@ -316,6 +338,18 @@ void NDS::seed_rtc_from_host_time(u16 year, u8 month, u8 day, u8 dow, u8 hh, u8 
     rtc_.seed(Rtc::DateTime{year, month, day, dow, hh, mm, ss});
 }
 
+void NDS::set_keypad_state(u16 keyinput) {
+    keypad_.set_keyinput(keyinput, irq9_, irq7_);
+    update_arm9_irq_signals();
+    update_arm7_irq_signals();
+}
+
+void NDS::set_lid_closed(bool closed) {
+    // IF.22 is NDS7-only; no ARM9 signal refresh.
+    lid_switch_.set_closed(closed, irq7_);
+    update_arm7_irq_signals();
+}
+
 u32 NDS::arm7_io_read32(u32 addr) {
     switch (addr) {
     case IO_IME:
@@ -337,6 +371,14 @@ u32 NDS::arm7_io_read32(u32 addr) {
         // with the upper bytes zero. Real hardware open-buses the upper bytes;
         // returning zero is safe and matches our other narrow registers.
         return static_cast<u32>(rtc_.read_pins());
+    case IO_KEYINPUT:
+        // 32-bit read pairs KEYINPUT with this CPU's own KEYCNT cell.
+        return (static_cast<u32>(keypad_.read_keycnt(Keypad::Side::Arm7)) << 16) |
+               static_cast<u32>(keypad_.read_keyinput());
+    case IO_KEYCNT:
+        return static_cast<u32>(keypad_.read_keycnt(Keypad::Side::Arm7));
+    case IO_EXTKEYIN:
+        return static_cast<u32>(lid_switch_.read_extkeyin());
     default:
         return 0;
     }
@@ -372,6 +414,15 @@ u16 NDS::arm7_io_read16(u32 addr) {
         // upper byte zero. Mirrors the word path above.
         return static_cast<u16>(rtc_.read_pins());
     }
+    if (addr == IO_KEYINPUT) {
+        return keypad_.read_keyinput();
+    }
+    if (addr == IO_KEYCNT) {
+        return keypad_.read_keycnt(Keypad::Side::Arm7);
+    }
+    if (addr == IO_EXTKEYIN) {
+        return lid_switch_.read_extkeyin();
+    }
     return 0;
 }
 
@@ -404,6 +455,19 @@ u8 NDS::arm7_io_read8(u32 addr) {
     }
     if (addr == IO_RTC) {
         return rtc_.read_pins();
+    }
+    if (addr >= IO_KEYINPUT && addr < IO_KEYINPUT + 2u) {
+        const u32 shift = (addr - IO_KEYINPUT) * 8u;
+        return static_cast<u8>((keypad_.read_keyinput() >> shift) & 0xFFu);
+    }
+    if (addr >= IO_KEYCNT && addr < IO_KEYCNT + 2u) {
+        const u32 shift = (addr - IO_KEYCNT) * 8u;
+        return static_cast<u8>((keypad_.read_keycnt(Keypad::Side::Arm7) >> shift) & 0xFFu);
+    }
+    // EXTKEYIN is NDS7-only; no ARM9 route added (open-bus on ARM9).
+    if (addr >= IO_EXTKEYIN && addr < IO_EXTKEYIN + 2u) {
+        const u32 shift = (addr - IO_EXTKEYIN) * 8u;
+        return static_cast<u8>((lid_switch_.read_extkeyin() >> shift) & 0xFFu);
     }
     return 0;
 }
