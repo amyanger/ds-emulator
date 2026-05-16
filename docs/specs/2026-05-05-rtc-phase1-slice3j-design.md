@@ -5,12 +5,17 @@
 source on the project (1 Hz tick that advances internal date/time and, when
 an enabled alarm matches, raises NDS7 IF.7 via the existing edge-triggered
 discipline introduced in slice 3i).
-**Status:** draft, awaiting approval.
+**Status:** closed (2026-05-16) — landed through `f42b0d8`; 71 CTest binaries
+green. All §9 completion criteria ticked. No deviations from the design — the
+seven planned commits shipped in the documented order, the six new test
+binaries registered as planned, and the file-size estimates held (all under
+the 500-line soft cap; `rtc.cpp` 461 lines vs the ~430 projection, largest
+new test `rtc_commands_test.cpp` 354 lines).
 **Prior slice:** 3i (IPC + ARM9 IRQ plumbing) — landed through `0e564e6`; 65
 CTest binaries green.
 **Next slice (proposed):** 3k (keypad + KEYINPUT/KEYCNT + EXTKEYIN + lid
 switch — second/third scheduler-driven IRQ sources, ARM7 IF.12 keypad and
-ARM7 IF.22 screens-unfolded). Still to be scoped.
+ARM7 IF.22 screens-unfolded). Scoping in progress.
 
 ---
 
@@ -1379,50 +1384,75 @@ Confirmed unchanged behaviors after each commit:
 
 ## 9. Slice completion criteria
 
-- [ ] `class Rtc` exists in `src/rtc/rtc.{hpp,cpp}` with the public
+- [x] `class Rtc` exists in `src/rtc/rtc.{hpp,cpp}` with the public
       surface declared in §4.2 and `reset()` implemented.
-- [ ] `IO_RTC` constant in `src/bus/io_regs.hpp`. Exactly one
-      definition; no other constant changed.
-- [ ] `EventKind::Rtc1HzTick` enumerator added to
+      (Commit `c257af4` scaffold; final shape across `c257af4..f42b0d8`.
+      `rtc.hpp` 150 lines, `rtc.cpp` 461 lines.)
+- [x] `IO_RTC` constant in `src/bus/io_regs.hpp`. Exactly one
+      definition; no other constant changed. Verified at
+      `src/bus/io_regs.hpp:32` (`IO_RTC = 0x04000138u`).
+- [x] `EventKind::Rtc1HzTick` enumerator added to
       `src/scheduler/event.hpp`. No other enumerator changed.
-- [ ] `Rtc rtc_` member on `NDS`. Accessor `rtc()`. Include
-      `rtc/rtc.hpp` in `nds.hpp`.
-- [ ] ARM7 IO routes for `0x4000138` wired in `arm7_io_read8`,
+      Verified at `src/scheduler/event.hpp:11`. (Commit `17dd7ef`.)
+- [x] `Rtc rtc_` member on `NDS`. Accessor `rtc()`. Include
+      `rtc/rtc.hpp` in `nds.hpp`. Verified at `src/nds.hpp:58` (accessor)
+      and `src/nds.hpp:125` (member). (Commit `c257af4`.)
+- [x] ARM7 IO routes for `0x4000138` wired in `arm7_io_read8`,
       `arm7_io_write8`, plus the byte-aliased halfword/word paths
-      per §4.4.
-- [ ] `NDS::reset()` calls `rtc_.reset()` and schedules the first
+      per §4.4. Verified at `src/nds.cpp:339, 373, 406` (read 8/16/32)
+      and `src/nds.cpp:446, 506, 583` (write 8/16/32). (Commit `c257af4`.)
+- [x] `NDS::reset()` calls `rtc_.reset()` and schedules the first
       `Rtc1HzTick` at `now + kArm9CyclesPerSecond` (after `scheduler_.reset()`).
-- [ ] `NDS::on_scheduler_event` switch dispatches `Rtc1HzTick` to
+      Verified at `src/nds.cpp:44, 46`. (Commit `17dd7ef`.)
+- [x] `NDS::on_scheduler_event` switch dispatches `Rtc1HzTick` to
       `rtc_.tick(irq7_)`, then `update_arm7_irq_signals()`, then
-      reschedules.
-- [ ] `NDS::seed_rtc_from_host_time(...)` body forwards to
-      `rtc_.seed({year, month, day, dow, hh, mm, ss})`.
-- [ ] Bit-bang protocol per §4.5 implemented: /CS framing, /SCK
+      reschedules. Verified at `src/nds.cpp:78..84`. (Commits
+      `17dd7ef` dispatch, `3fe1916` adds the IRQ-raise path inside
+      `Rtc::tick`.)
+- [x] `NDS::seed_rtc_from_host_time(...)` body forwards to
+      `rtc_.seed({year, month, day, dow, hh, mm, ss})`. Verified at
+      `src/nds.cpp:315..317`. (Commit `c257af4`.)
+- [x] Bit-bang protocol per §4.5 implemented: /CS framing, /SCK
       rising-edge shifting, LSB-first byte ordering, command-byte
-      decode validating bits 5..7 == `110b`.
-- [ ] All read commands per §5 implemented: Status1 (with auto-clear),
-      Status2, DateTime, Date, Time, Alarm1, Alarm2.
-- [ ] All write commands per §5 implemented: Status1, Status2,
-      Alarm1, Alarm2.
-- [ ] Free / FreqSel commands routed as no-op-with-DEBUG-warn.
-- [ ] Calendar advance per §4.6 with leap-year rule per §8.1 #5.
-- [ ] Alarm comparison + rising-edge raise per §4.6, §5.7.
-- [ ] `status1_` bits 4-7 auto-clear on read per §5.4.
-- [ ] Six new test binaries: `rtc_protocol_test`, `rtc_commands_test`,
+      decode validating bits 5..7 == `110b`. (Commit `af9a749`,
+      covered by `rtc_protocol_test`.)
+- [x] All read commands per §5 implemented: Status1 (with auto-clear),
+      Status2, DateTime, Date, Time, Alarm1, Alarm2. (Commit `823b672`,
+      covered by `rtc_commands_test`.)
+- [x] All write commands per §5 implemented: Status1, Status2,
+      Alarm1, Alarm2. (Commit `1308b96`, write-side REQUIRE blocks
+      appended to `rtc_commands_test`.)
+- [x] Free / FreqSel commands routed as no-op-with-DEBUG-warn.
+      (Commit `af9a749`, default branch of the command dispatch.)
+- [x] Calendar advance per §4.6 with leap-year rule per §8.1 #5.
+      (Commit `17dd7ef`, covered by `rtc_tick_test`.)
+- [x] Alarm comparison + rising-edge raise per §4.6, §5.7.
+      (Commit `3fe1916`, covered by `rtc_alarm_test` and
+      `rtc_irq_test`.)
+- [x] `status1_` bits 4-7 auto-clear on read per §5.4. (Commit
+      `823b672`, dedicated REQUIRE block in `rtc_commands_test`.)
+- [x] Six new test binaries: `rtc_protocol_test`, `rtc_commands_test`,
       `rtc_alarm_test`, `rtc_tick_test`, `rtc_irq_test`,
-      `rtc_integration_test`. All registered via `add_ds_unit_test()`.
-- [ ] `ctest --output-on-failure` reports 71/71 passing in Debug.
-- [ ] `clang-format` clean on all new files.
-- [ ] `ds-architecture-rule-checker` and `gbatek-reviewer` ran clean
+      `rtc_integration_test`. All registered via `add_ds_unit_test()`
+      in `tests/CMakeLists.txt:83..88`. Verified via `ctest -N`
+      (test indices 66..71).
+- [x] `ctest --output-on-failure` reports 71/71 passing in Debug.
+      Verified 2026-05-16.
+- [x] `clang-format` clean on all new files (enforced by the
+      `PostToolUse` hook on every Edit/Write).
+- [x] `ds-architecture-rule-checker` and `gbatek-reviewer` ran clean
       on every commit's uncommitted diff.
-- [ ] `quality-reviewer` ran clean on every commit.
-- [ ] No file exceeds the 500-line soft cap. Maximum projected:
-      `rtc.cpp` at ~430 lines.
-- [ ] No new SDL include path. No new `<chrono>` include in
-      `libds_core` (frontend-only). Static grep verified.
-- [ ] No new pointers held across subsystems. No `cpu/` or `bus/`
+- [x] `quality-reviewer` ran clean on every commit.
+- [x] No file exceeds the 500-line soft cap. Largest new production
+      file `rtc.cpp` at 461 lines; largest new test
+      `rtc_commands_test.cpp` at 354 lines.
+- [x] No new SDL include path. No new `<chrono>` include in
+      `libds_core` (frontend-only). Static grep over `src/rtc/`,
+      `src/nds.cpp`, and `src/nds.hpp` returns only a documentation
+      comment at `src/nds.hpp:31`.
+- [x] No new pointers held across subsystems. No `cpu/` or `bus/`
       includes from `rtc/` — confirmed by grep over `src/rtc/`.
-- [ ] No save-state code added (deferred per CLAUDE.md rule-5
+- [x] No save-state code added (deferred per CLAUDE.md rule-5
       carve-out). `reset()` implemented on `Rtc`.
 
 ---
