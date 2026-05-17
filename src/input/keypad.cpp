@@ -46,13 +46,37 @@ bool Keypad::prev_condition(Side side) const {
     return prev_condition_[static_cast<u8>(side)];
 }
 
-bool Keypad::compute_condition(Side /*side*/) const {
-    return false;
+bool Keypad::compute_condition(Side side) const {
+    const KeyCnt& c = cell(side);
+    if (!c.enable) {
+        return false;
+    }
+    const u16 selected = static_cast<u16>(c.select_mask & kButtonMask);
+    // GBATEK is silent on selected==0; melonDS and we treat it as "no
+    // source" in both OR and AND modes to avoid the vacuous-true case
+    // where enabling AND with no buttons would fire on every recompute.
+    if (selected == 0u) {
+        return false;
+    }
+    const u16 pressed = static_cast<u16>(~keyinput_ & kButtonMask);
+    const u16 matched = static_cast<u16>(selected & pressed);
+    if (c.mode_and) {
+        return matched == selected;
+    }
+    return matched != 0u;
 }
 
-void Keypad::recompute_irqs(IrqController& /*irq9*/, IrqController& /*irq7*/) {
-    // No-op stub: real body raises IF.12 on each side's rising edge,
-    // reading prev_condition_ before storing the new value.
+void Keypad::recompute_irqs(IrqController& irq9, IrqController& irq7) {
+    const bool cond9 = compute_condition(Side::Arm9);
+    const bool cond7 = compute_condition(Side::Arm7);
+    if (cond9 && !prev_cell(Side::Arm9)) {
+        irq9.raise(1u << 12);
+    }
+    if (cond7 && !prev_cell(Side::Arm7)) {
+        irq7.raise(1u << 12);
+    }
+    prev_cell(Side::Arm9) = cond9;
+    prev_cell(Side::Arm7) = cond7;
 }
 
 } // namespace ds
