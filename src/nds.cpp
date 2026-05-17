@@ -211,6 +211,20 @@ void NDS::arm9_io_write32(u32 addr, u32 value) {
         update_arm9_irq_signals();
         update_arm7_irq_signals();
         break;
+    case IO_KEYINPUT:
+        // KEYINPUT (low halfword) is read-only on hardware; only the high
+        // halfword targeting KEYCNT is applied. The KEYCNT cell is per-CPU.
+        keypad_.write_keycnt(Keypad::Side::Arm9, static_cast<u16>(value >> 16), irq9_, irq7_);
+        update_arm9_irq_signals();
+        update_arm7_irq_signals();
+        break;
+    case IO_KEYCNT:
+        // Low halfword targets ARM9 KEYCNT; high halfword would land at
+        // 0x4000134 which is unmapped on the ARM9 view — drop silently.
+        keypad_.write_keycnt(Keypad::Side::Arm9, static_cast<u16>(value & 0xFFFFu), irq9_, irq7_);
+        update_arm9_irq_signals();
+        update_arm7_irq_signals();
+        break;
     default:
         break;
     }
@@ -252,6 +266,12 @@ void NDS::arm9_io_write16(u32 addr, u16 value) {
     }
     if (addr == IO_IPCFIFOCNT) {
         ipc_fifo_.write_cnt(IpcFifo::Side::Arm9, value, irq9_, irq7_);
+        update_arm9_irq_signals();
+        update_arm7_irq_signals();
+        return;
+    }
+    if (addr == IO_KEYCNT) {
+        keypad_.write_keycnt(Keypad::Side::Arm9, value, irq9_, irq7_);
         update_arm9_irq_signals();
         update_arm7_irq_signals();
         return;
@@ -312,6 +332,16 @@ void NDS::arm9_io_write8(u32 addr, u8 value) {
         const u16 cur = ipc_fifo_.read_cnt(IpcFifo::Side::Arm9);
         const u16 next = static_cast<u16>((cur & 0x00FFu) | (static_cast<u32>(value) << 8));
         ipc_fifo_.write_cnt(IpcFifo::Side::Arm9, next, irq9_, irq7_);
+        update_arm9_irq_signals();
+        update_arm7_irq_signals();
+        return;
+    }
+    if (addr >= IO_KEYCNT && addr < IO_KEYCNT + 2u) {
+        const u32 shift = (addr - IO_KEYCNT) * 8u;
+        const u16 cur = keypad_.read_keycnt(Keypad::Side::Arm9);
+        const u16 mask = static_cast<u16>(~(static_cast<u16>(0xFFu) << shift));
+        const u16 next = static_cast<u16>((cur & mask) | (static_cast<u16>(value) << shift));
+        keypad_.write_keycnt(Keypad::Side::Arm9, next, irq9_, irq7_);
         update_arm9_irq_signals();
         update_arm7_irq_signals();
         return;
@@ -509,6 +539,20 @@ void NDS::arm7_io_write32(u32 addr, u32 value) {
         // pins; upper bytes are reserved and discarded.
         rtc_.write_pins(static_cast<u8>(value & 0xFFu));
         break;
+    case IO_KEYINPUT:
+        // KEYINPUT (low halfword) is read-only on hardware; only the high
+        // halfword targeting KEYCNT is applied. The KEYCNT cell is per-CPU.
+        keypad_.write_keycnt(Keypad::Side::Arm7, static_cast<u16>(value >> 16), irq9_, irq7_);
+        update_arm9_irq_signals();
+        update_arm7_irq_signals();
+        break;
+    case IO_KEYCNT:
+        // Low halfword targets ARM7 KEYCNT; high halfword would land at
+        // 0x4000134 which is unmapped — drop silently.
+        keypad_.write_keycnt(Keypad::Side::Arm7, static_cast<u16>(value & 0xFFFFu), irq9_, irq7_);
+        update_arm9_irq_signals();
+        update_arm7_irq_signals();
+        break;
     default:
         break;
     }
@@ -568,6 +612,12 @@ void NDS::arm7_io_write16(u32 addr, u16 value) {
         // Halfword write to the 1-byte RTC register: low byte drives pins,
         // upper byte is reserved.
         rtc_.write_pins(static_cast<u8>(value & 0xFFu));
+        return;
+    }
+    if (addr == IO_KEYCNT) {
+        keypad_.write_keycnt(Keypad::Side::Arm7, value, irq9_, irq7_);
+        update_arm9_irq_signals();
+        update_arm7_irq_signals();
         return;
     }
 }
@@ -645,6 +695,16 @@ void NDS::arm7_io_write8(u32 addr, u8 value) {
     }
     if (addr == IO_RTC) {
         rtc_.write_pins(value);
+        return;
+    }
+    if (addr >= IO_KEYCNT && addr < IO_KEYCNT + 2u) {
+        const u32 shift = (addr - IO_KEYCNT) * 8u;
+        const u16 cur = keypad_.read_keycnt(Keypad::Side::Arm7);
+        const u16 mask = static_cast<u16>(~(static_cast<u16>(0xFFu) << shift));
+        const u16 next = static_cast<u16>((cur & mask) | (static_cast<u16>(value) << shift));
+        keypad_.write_keycnt(Keypad::Side::Arm7, next, irq9_, irq7_);
+        update_arm9_irq_signals();
+        update_arm7_irq_signals();
         return;
     }
 }
