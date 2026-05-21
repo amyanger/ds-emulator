@@ -10,7 +10,13 @@ EXTKEYIN at `0x4000136` is NDS7-only — ARM9 access returns open-bus — and
 its hinge bit (EXTKEYIN.7) drives the second new source, NDS7 IF.22
 "Screens unfolded", on the rising edge of "unfolded" (i.e. on the 1→0
 transition of the hinge bit).
-**Status:** draft, awaiting approval.
+**Status:** closed (2026-05-21) — landed through `14d3cac`; 77 CTest binaries
+green. All §9 completion criteria ticked. No deviations from the design — the
+seven planned commits shipped in the documented order (`44662f2..14d3cac`),
+the six new test binaries registered as planned (CTest indices 72..77), and
+every new file came in well under the 500-line soft cap (largest production
+file `keypad.cpp` at 82 lines; largest test `keypad_irq_test.cpp` at 226
+lines).
 **Prior slice:** 3j (ARM7 RTC + scheduler-driven IRQ source) — landed
 through `f42b0d8`; 71 CTest binaries green.
 **Next slice (proposed):** TBD. Candidates: timers (4 per CPU, IF.3..6),
@@ -1506,53 +1512,71 @@ Confirmed unchanged behaviors after each commit:
 
 ## 9. Slice completion criteria
 
-- [ ] `class Keypad` exists in `src/input/keypad.{hpp,cpp}` with the
+- [x] `class Keypad` exists in `src/input/keypad.{hpp,cpp}` with the
       public surface declared in §4.2 and `reset()` implemented.
-- [ ] `class LidSwitch` exists in `src/input/lid_switch.{hpp,cpp}`
+      (`keypad.hpp` 52 lines, `keypad.cpp` 82 lines. Commit `44662f2`
+      scaffold; condition + raise across `91df15a..6c75fc9`.)
+- [x] `class LidSwitch` exists in `src/input/lid_switch.{hpp,cpp}`
       with the public surface declared in §4.2 and `reset()`
-      implemented.
-- [ ] `IO_KEYINPUT`, `IO_KEYCNT`, `IO_EXTKEYIN` constants in
+      implemented. (`lid_switch.hpp` 34 lines, `lid_switch.cpp` 34
+      lines. Commit `44662f2` scaffold; raise in `ba083ca`.)
+- [x] `IO_KEYINPUT`, `IO_KEYCNT`, `IO_EXTKEYIN` constants in
       `src/bus/io_regs.hpp`. Exactly three new definitions; no other
-      constant changed.
-- [ ] `Keypad keypad_` member on `NDS`. Accessor `keypad()`. Include
-      `input/keypad.hpp` in `nds.hpp`.
-- [ ] `LidSwitch lid_switch_` member on `NDS`. Accessor `lid_switch()`.
-      Include `input/lid_switch.hpp` in `nds.hpp`.
-- [ ] ARM9 IO routes for `0x4000130` (R / W) and `0x4000132` (R / W)
+      constant changed. Verified at `src/bus/io_regs.hpp:36-38`.
+      (Commit `44662f2`.)
+- [x] `Keypad keypad_` member on `NDS`. Accessor `keypad()`. Include
+      `input/keypad.hpp` in `nds.hpp`. Verified at `src/nds.hpp:140`
+      (member), `:63` (accessor), `:9` (include). (Commit `44662f2`.)
+- [x] `LidSwitch lid_switch_` member on `NDS`. Accessor `lid_switch()`.
+      Include `input/lid_switch.hpp` in `nds.hpp`. Verified at
+      `src/nds.hpp:141` (member), `:66` (accessor), `:10` (include).
+      (Commit `44662f2`.)
+- [x] ARM9 IO routes for `0x4000130` (R / W) and `0x4000132` (R / W)
       wired in `arm9_io_read{8,16,32}` and `arm9_io_write{8,16,32}`
-      per §4.4.
-- [ ] ARM7 IO routes for `0x4000130` (R), `0x4000132` (R / W), and
+      per §4.4. Verified at `src/nds.cpp:107-112, 140-145, 174-181`
+      (read 32/16/8) and `:214-225, 273-275, 339-345` (write 32/16/8).
+      (Commits `44662f2`, `91df15a`.)
+- [x] ARM7 IO routes for `0x4000130` (R), `0x4000132` (R / W), and
       `0x4000136` (R) wired in `arm7_io_read{8,16,32}` and
       `arm7_io_write{8,16,32}` per §4.4. KEYINPUT and EXTKEYIN writes
-      are silently dropped.
-- [ ] ARM9 access to `0x4000136` returns zero via the default fall-
-      through (no route added). Documented and tested.
-- [ ] `NDS::reset()` calls `keypad_.reset()` and `lid_switch_.reset()`.
-- [ ] `NDS::set_keypad_state(u16)` body forwards to `keypad_.
+      are silently dropped. Verified at `src/nds.cpp:404-411, 447-455,
+      489-501` (read 32/16/8) and `:542-552, 617-619, 700-706` (write
+      32/16/8). (Commits `44662f2`, `91df15a`, `e01fa44`.)
+- [x] ARM9 access to `0x4000136` returns zero via the default fall-
+      through (no route added). Documented and tested in
+      `extkeyin_test.cpp`. (Commit `e01fa44`.)
+- [x] `NDS::reset()` calls `keypad_.reset()` and `lid_switch_.reset()`.
+      Verified at `src/nds.cpp:45-46`. (Commit `44662f2`.)
+- [x] `NDS::set_keypad_state(u16)` body forwards to `keypad_.
       set_keyinput(...)` and calls both `update_arm9_irq_signals()`
-      and `update_arm7_irq_signals()`.
-- [ ] `NDS::set_lid_closed(bool)` body forwards to `lid_switch_.
+      and `update_arm7_irq_signals()`. Verified at `src/nds.cpp:371-375`.
+      (Commit `44662f2`.)
+- [x] `NDS::set_lid_closed(bool)` body forwards to `lid_switch_.
       set_closed(...)` and calls `update_arm7_irq_signals()` only.
-- [ ] `Keypad::compute_condition` and `recompute_irqs` per §4.5;
-      rising-edge latch indexed by `Side`.
-- [ ] `LidSwitch::set_closed` rising-edge latch per §4.6;
-      `prev_unfolded_` initialized to `true` on reset.
-- [ ] Six new test binaries: `keypad_state_test`,
+      Verified at `src/nds.cpp:377-380`. (Commit `44662f2`.)
+- [x] `Keypad::compute_condition` and `recompute_irqs` per §4.5;
+      rising-edge latch indexed by `Side`. (Commit `6c75fc9`.)
+- [x] `LidSwitch::set_closed` rising-edge latch per §4.6;
+      `prev_unfolded_` initialized to `true` on reset. (Commit `ba083ca`.)
+- [x] Six new test binaries: `keypad_state_test`,
       `keypad_keycnt_test`, `keypad_irq_test`, `extkeyin_test`,
       `lid_irq_test`, `keypad_integration_test`. All registered via
-      `add_ds_unit_test()` in `tests/CMakeLists.txt`.
-- [ ] `ctest --output-on-failure` reports 77/77 passing in Debug.
-- [ ] `clang-format` clean on all new files (enforced by the
+      `add_ds_unit_test()` in `tests/CMakeLists.txt` (CTest indices
+      72..77).
+- [x] `ctest --output-on-failure` reports 77/77 passing in Debug.
+- [x] `clang-format` clean on all new files (enforced by the
       `PostToolUse` hook).
-- [ ] `ds-architecture-rule-checker` and `gbatek-reviewer` ran clean
+- [x] `ds-architecture-rule-checker` and `gbatek-reviewer` ran clean
       on every commit's uncommitted diff.
-- [ ] `quality-reviewer` ran clean on every commit.
-- [ ] No file exceeds the 500-line soft cap.
-- [ ] No new SDL include path. No new platform headers in
+- [x] `quality-reviewer` ran clean on every commit.
+- [x] No file exceeds the 500-line soft cap. (Max new production file
+      `keypad.cpp` 82 lines; max new test `keypad_irq_test.cpp` 226
+      lines.)
+- [x] No new SDL include path. No new platform headers in
       `libds_core`.
-- [ ] No new pointers held across subsystems. No `cpu/` or `bus/`
+- [x] No new pointers held across subsystems. No `cpu/` or `bus/`
       includes from `input/`.
-- [ ] No save-state code added (deferred per CLAUDE.md rule-5
+- [x] No save-state code added (deferred per CLAUDE.md rule-5
       carve-out). `reset()` implemented on both new classes; rising-
       edge latches tracked as save-state debt in §8.1 #9.
 
