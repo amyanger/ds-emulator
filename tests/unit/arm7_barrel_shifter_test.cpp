@@ -2,7 +2,7 @@
 // corner cases documented in GBATEK — specifically LSR #0, ASR #0,
 // ROR #0 (which is RRX), and LSL #32 (carry-out is bit 0 of operand).
 
-#include "cpu/arm7/arm7_alu.hpp"
+#include "cpu/common/arm_alu.hpp"
 #include "require.hpp"
 
 #include <cstdio>

@@ -18,7 +18,7 @@
 
 #include "bus/arm7_bus.hpp"
 #include "cpu/arm7/arm7.hpp"
-#include "cpu/arm7/arm7_alu.hpp"
+#include "cpu/common/arm_alu.hpp"
 #include "cpu/arm7/arm7_exception.hpp"
 #include "cpu/arm7/arm7_state.hpp"
 #include "cpu/arm7/arm7_thumb_internal.hpp"

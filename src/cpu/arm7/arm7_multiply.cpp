@@ -9,7 +9,7 @@
 // branch logs a warn and no-ops. Task 6 and Task 7 fill in the long path.
 
 #include "cpu/arm7/arm7_decode_internal.hpp"
-#include "cpu/arm7/arm7_alu.hpp"
+#include "cpu/common/arm_alu.hpp"
 #include "ds/common.hpp"
 
 namespace ds {

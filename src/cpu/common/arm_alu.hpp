@@ -1,8 +1,9 @@
 #pragma once
 
-// Pure ARMv4T ALU helpers: barrel shifter, rotated-immediate operand,
-// condition code evaluation, and flag updaters. No access to Arm7State —
-// everything takes and returns plain values so it is trivially testable.
+// Pure ARM ALU helpers shared by the ARM7 (ARMv4T) and ARM9 (ARMv5TE) cores:
+// barrel shifter, rotated-immediate operand, condition code evaluation, and
+// flag updaters. No CPU-state dependency — everything takes and returns plain
+// values so it is trivially testable.
 
 #include "ds/common.hpp"
 

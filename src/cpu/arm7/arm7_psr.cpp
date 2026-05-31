@@ -11,7 +11,7 @@
 // 10..13.
 
 #include "cpu/arm7/arm7_decode_internal.hpp"
-#include "cpu/arm7/arm7_alu.hpp"
+#include "cpu/common/arm_alu.hpp"
 #include "ds/common.hpp"
 
 namespace ds {

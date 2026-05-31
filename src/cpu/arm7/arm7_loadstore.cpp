@@ -4,7 +4,7 @@
 // up/down, writeback. Halfword and signed forms stay deferred to 3b2.
 
 #include "bus/arm7_bus.hpp"
-#include "cpu/arm7/arm7_alu.hpp"
+#include "cpu/common/arm_alu.hpp"
 #include "cpu/arm7/arm7_decode_internal.hpp"
 #include "ds/common.hpp"
 

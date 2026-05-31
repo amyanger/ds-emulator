@@ -1,9 +1,9 @@
-// Boundary-case coverage for the adc/sbc helpers in arm7_alu.hpp.
+// Boundary-case coverage for the adc/sbc helpers in cpu/common/arm_alu.hpp.
 // Every ARMv4T arithmetic data-processing instruction's flag output
 // funnels through these two functions, so the NZCV correctness for
 // the entire CPU rides on this test file.
 
-#include "cpu/arm7/arm7_alu.hpp"
+#include "cpu/common/arm_alu.hpp"
 #include "require.hpp"
 
 #include <cstdio>
@@ -46,14 +46,14 @@ static void adc_uses_carry_in() {
     AddResult r = adc(0xFFFF'FFFFu, 0xFFFF'FFFFu, true);
     REQUIRE(r.value == 0xFFFF'FFFFu);
     REQUIRE(r.carry == true);
-    REQUIRE(r.overflow == false);  // -1 + -1 = -2, not a signed overflow.
+    REQUIRE(r.overflow == false); // -1 + -1 = -2, not a signed overflow.
 }
 
 static void sbc_plain_sub_zero_minus_zero() {
     // Plain SUB: c_in=true. 0 - 0 = 0, no borrow → c=1, no overflow.
     AddResult r = sbc(0u, 0u, true);
     REQUIRE(r.value == 0u);
-    REQUIRE(r.carry == true);  // C = NOT Borrow, no borrow means C=1.
+    REQUIRE(r.carry == true); // C = NOT Borrow, no borrow means C=1.
     REQUIRE(r.overflow == false);
 }
 

@@ -11,7 +11,7 @@
 // THUMB.3 (imm8 DP): execute_dp_op with shifter_carry = current_c
 //   so MOV preserves C/V (logical-form path sets NZ + shifter_carry).
 
-#include "cpu/arm7/arm7_alu.hpp"
+#include "cpu/common/arm_alu.hpp"
 #include "cpu/arm7/arm7_decode_internal.hpp"
 #include "cpu/arm7/arm7_thumb_internal.hpp"
 

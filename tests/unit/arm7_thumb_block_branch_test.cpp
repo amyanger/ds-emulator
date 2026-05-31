@@ -472,7 +472,7 @@ static void bcond_every_cond_code_0_to_d() {
         u32 violating_flags;
     };
     // Each entry picks a single flag state that satisfies the condition
-    // and one that violates it. Match eval_condition (arm7_alu.hpp).
+    // and one that violates it. Match eval_condition (cpu/common/arm_alu.hpp).
     const Case cases[] = {
         {0x0u, CPSR_Z, 0u},              // EQ:  z
         {0x1u, 0u, CPSR_Z},              // NE:  !z

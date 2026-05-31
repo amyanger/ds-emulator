@@ -1,7 +1,7 @@
 // 16-case condition code evaluator. Every case exercised against a
 // CPSR with the relevant flag bit toggled.
 
-#include "cpu/arm7/arm7_alu.hpp"
+#include "cpu/common/arm_alu.hpp"
 #include "require.hpp"
 
 #include <cstdio>

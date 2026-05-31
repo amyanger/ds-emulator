@@ -5,7 +5,7 @@
 // NOT part of any public include path. Only files under src/cpu/arm7/
 // may include it.
 
-#include "cpu/arm7/arm7_alu.hpp"
+#include "cpu/common/arm_alu.hpp"
 #include "cpu/arm7/arm7_state.hpp"
 #include "ds/common.hpp"
 

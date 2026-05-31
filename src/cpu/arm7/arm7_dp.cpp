@@ -6,7 +6,7 @@
 // as the fall-through from dispatch_000_space() after no recognizer
 // matched.
 
-#include "cpu/arm7/arm7_alu.hpp"
+#include "cpu/common/arm_alu.hpp"
 #include "cpu/arm7/arm7_decode_internal.hpp"
 
 namespace ds {
