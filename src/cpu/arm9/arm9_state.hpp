@@ -1,8 +1,14 @@
 #pragma once
 
-// Arm7State — all CPU-visible state for the ARMv4T core.
-// This is pure data plus tiny helpers. `class Arm7` (in arm7.hpp) owns
-// an Arm7State and adds the fetch/decode/execute behavior on top.
+// Arm9State — all CPU-visible state for the ARMv5TE core (ARM946E-S).
+// This is pure data plus tiny helpers. `class Arm9` (in arm9.hpp) owns an
+// Arm9State and adds the fetch/decode/execute behavior on top.
+//
+// The register file, banking logic, and Mode enum are identical to the ARM7
+// (ARMv4T) — that machinery is copied verbatim from Arm7State. Only the reset
+// defaults differ (high reset vector, see reset()), plus the live Q flag
+// (CPSR bit 27, see the cpsr member comment). Mode lives in the shared
+// cpu/common/arm_mode.hpp so both state structs reference one definition.
 
 #include "cpu/common/arm_mode.hpp"
 #include "ds/common.hpp"
@@ -15,7 +21,7 @@ namespace ds {
 // Banks holding the physical storage for mode-banked registers.
 // User and System share the same bank, so only six SPSRs exist (one each
 // for FIQ/IRQ/SVC/ABT/UND) and the User/System bank has no SPSR.
-struct Arm7Banks {
+struct Arm9Banks {
     // User/System R8..R14 live here when CPSR mode = User or System.
     std::array<u32, 7> user_r8_r14{}; // [0]=R8 .. [6]=R14
     // FIQ has its own R8..R14.
@@ -33,7 +39,7 @@ struct Arm7Banks {
     u32 spsr_und = 0;
 };
 
-struct Arm7State {
+struct Arm9State {
     // Current-mode visible register file. `r[13]`, `r[14]`, and the FIQ
     // registers are reloaded from `banks` on every `switch_mode()` call.
     // `r[15]` is kept in sync with `pc` at the top of every execute step;
@@ -43,42 +49,34 @@ struct Arm7State {
     // Program counter — address of the next instruction to fetch. In ARM
     // state this is always 4-aligned. `r[15]` at the moment an instruction
     // executes is `pc + 4` (i.e. "current instruction address + 8").
-    u32 pc = 0;
+    u32 pc = 0xFFFF0000u;
 
     // CPSR. Reset default is 0xD3: SVC mode (M=0x13), IRQ disabled (I=1),
     // FIQ disabled (F=1), Thumb off (T=0), flags clear.
+    //
+    // Bit 27 is the sticky saturation (Q) flag on ARMv5TE — live and
+    // software-visible. Its producers (saturating math, accumulating signed
+    // multiplies) are all v5-only and land in slice 3m; Q is cleared ONLY by
+    // an explicit MSR. It is never masked off here or in the PSR path. reset()
+    // leaves bit 27 = 0 (implied by cpsr = 0xD3).
     u32 cpsr = 0xD3;
 
     // All banked register sets.
-    Arm7Banks banks{};
+    Arm9Banks banks{};
 
-    // Cycle counter — ARM7 cycles since reset. ARM9 cycles / 2.
+    // Cycle counter — ARM9 cycles since reset; 1:1 with the scheduler.
     u64 cycles = 0;
-
-    // BIOS HLE bookkeeping for SWI 0x04 IntrWait (and 0x05 VBlankIntrWait).
-    // The HLE models the real BIOS's "halt + re-check" loop by halting and
-    // rewinding PC so the SWI re-executes on wake. Real BIOS discards the
-    // waited mask ONCE at entry, then loops internally; our re-execution
-    // model would otherwise re-run the discard each iteration and clobber
-    // the bit the IRQ handler just wrote. Set to true when IntrWait halts,
-    // cleared when it consumes and returns. Suppresses the discard branch
-    // on re-entry.
-    //
-    // SAVE-STATE DEBT: must be serialized when the Arm7State save/load
-    // pass lands. Dropping this on reload re-introduces the deadlock if
-    // the save is taken mid-wait.
-    bool intr_wait_pending = false;
 
     // Reset to DS post-boot defaults. Direct boot later overrides pc and
     // some registers based on the cart header; here we just give sane
-    // power-on values.
+    // power-on values. ARM9 resets to the HIGH exception vector (DS firmware
+    // always runs with CP15 control bit 13 set), unlike ARM7 which resets to 0.
     void reset() {
         r = {};
-        pc = 0;
+        pc = 0xFFFF0000u;
         cpsr = 0xD3;
         banks = {};
         cycles = 0;
-        intr_wait_pending = false;
         load_banked_registers(Mode::Supervisor); // establishes the invariant
     }
 
@@ -97,9 +95,8 @@ struct Arm7State {
     // Returns a pointer to the SPSR storage slot for the current mode.
     // Returns nullptr when the current mode is User or System (neither
     // of those modes has a dedicated SPSR — they share the user bank
-    // and the Arm7Banks struct has no spsr_usr or spsr_sys field).
-    // Used by arm7_psr.cpp for MRS / MSR SPSR, and by future slice 3d
-    // exception-entry code.
+    // and the Arm9Banks struct has no spsr_usr or spsr_sys field).
+    // Used by arm9_psr.cpp for MRS / MSR SPSR, and by exception-entry code.
     u32* spsr_slot() {
         switch (current_mode()) {
         case Mode::Fiq:
@@ -117,7 +114,7 @@ struct Arm7State {
         }
     }
 
-    const u32* spsr_slot() const { return const_cast<Arm7State*>(this)->spsr_slot(); }
+    const u32* spsr_slot() const { return const_cast<Arm9State*>(this)->spsr_slot(); }
 
 private:
     void store_banked_registers(Mode m) {
@@ -159,7 +156,7 @@ private:
             banks.und_r13_r14[1] = r[14];
             break;
         default:
-            assert(false && "Arm7State::switch_mode: invalid Mode value");
+            assert(false && "Arm9State::switch_mode: invalid Mode value");
             break;
         }
     }
@@ -203,7 +200,7 @@ private:
             r[14] = banks.und_r13_r14[1];
             break;
         default:
-            assert(false && "Arm7State::switch_mode: invalid Mode value");
+            assert(false && "Arm9State::switch_mode: invalid Mode value");
             break;
         }
     }
