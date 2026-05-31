@@ -45,12 +45,6 @@ void Arm9::step_one_instruction() {
     step_arm();
 }
 
-void Arm9::step_arm() {
-    // TODO(commit 5): real ARM-state fetch/decode/execute dispatcher.
-    // Stubbed this slice — advance one cycle so run_until's loop terminates.
-    state_.cycles += 1;
-}
-
 void Arm9::step_thumb() {
     // ARM9 Thumb state is not implemented until slice 3n; nothing in 3l sets
     // CPSR.T, so this path is unreachable.

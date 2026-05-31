@@ -40,8 +40,7 @@ public:
 
 private:
     // Fetch one ARM instruction at pc_, advance pc_, set R15 to pc_+8
-    // (= instruction_addr + 8), and execute. Defined in arm9_decode.cpp
-    // (commit 5). Stubbed this slice — burns one cycle.
+    // (= instruction_addr + 8), and execute. Defined in arm9_decode.cpp.
     void step_arm();
 
     // ARM9 Thumb state is not implemented until slice 3n; nothing in 3l sets
