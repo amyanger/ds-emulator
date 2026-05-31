@@ -71,11 +71,6 @@ public:
     // Host-injection path for the lid hinge. true = closed/folded.
     void set_lid_closed(bool closed);
 
-    // Cached ARM9 IRQ line bool. Recomputed on every IME/IE/IF write because
-    // the ARM9 stub has no set_irq_line(); when the ARM9 decoder lands this
-    // cache becomes a direct push into cpu9_ and the accessor goes away.
-    bool arm9_irq_line_cached() const { return arm9_irq_line_cached_; }
-
     // Test/debug accessor for the SOUNDBIAS register. NOT for cross-subsystem use.
     u16 soundbias() const { return soundbias_; }
 
@@ -108,9 +103,9 @@ private:
     // no subsystem may hold a pointer to another (rule 3).
     void update_arm7_irq_signals();
 
-    // ARM9 counterpart of update_arm7_irq_signals. The ARM9 stub has no
-    // set_irq_line() yet, so the body only caches the line bool; once
-    // Arm9 has set_irq_line(), the body becomes a direct push.
+    // ARM9 counterpart of update_arm7_irq_signals. Pushes the live IRQ line
+    // into cpu9_. (ARM9 has no halt-wake bit: HALTCNT is ARM7-only; ARM9 halt
+    // is CP15 Wait-For-Interrupt, slice 3o.)
     void update_arm9_irq_signals();
 
     Scheduler scheduler_;
@@ -132,7 +127,6 @@ private:
     Arm9Bus arm9_bus_;
     Arm7Bus arm7_bus_;
     IrqController irq9_{};
-    bool arm9_irq_line_cached_ = false;
     IrqController irq7_{};
     IpcSync ipc_sync_{};
     IpcFifo ipc_fifo_{};

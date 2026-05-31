@@ -1,7 +1,6 @@
 // Exercises the ARM9-side IrqController storage and IO routing for IME/IE/IF.
-// CPU-line sampling is deferred until Arm9 has set_irq_line(); this covers the
-// bus-side round-trip plus the cached line bool that update_arm9_irq_signals()
-// recomputes.
+// Covers the bus-side round-trip plus the live IRQ line pushed into cpu9_ by
+// update_arm9_irq_signals().
 
 #include "bus/io_regs.hpp"
 #include "interrupt/irq_controller.hpp"
@@ -83,16 +82,16 @@ static void arm9_io_ime_reserved_bytes_are_no_ops() {
 }
 
 // Case 7: every IME/IE/IF write path calls update_arm9_irq_signals(), which
-// recomputes the cached line bool. Set up state where the line is true and
-// confirm the IF write path triggers the recompute.
-static void arm9_irq_line_cached_recomputed_on_writes() {
+// pushes the live line into cpu9_. Set up state where the line is true and
+// confirm the IF write path drives cpu9_'s IRQ line.
+static void arm9_irq_line_pushed_on_writes() {
     NDS nds;
 
     nds.arm9_io_write32(IO_IME, 1u);
     nds.arm9_io_write32(IO_IE, 1u);
     nds.irq9().raise(1u);
     nds.arm9_io_write32(IO_IF, 0u);
-    REQUIRE(nds.arm9_irq_line_cached() == true);
+    REQUIRE(nds.cpu9().irq_line() == true);
 }
 
 int main() {
@@ -108,8 +107,8 @@ int main() {
     std::puts("[PASS] arm9_io_if_halfword_write_one_clear");
     arm9_io_ime_reserved_bytes_are_no_ops();
     std::puts("[PASS] arm9_io_ime_reserved_bytes_are_no_ops");
-    arm9_irq_line_cached_recomputed_on_writes();
-    std::puts("[PASS] arm9_irq_line_cached_recomputed_on_writes");
+    arm9_irq_line_pushed_on_writes();
+    std::puts("[PASS] arm9_irq_line_pushed_on_writes");
     std::puts("arm9_irq_io_test: all 7 cases passed");
     return 0;
 }

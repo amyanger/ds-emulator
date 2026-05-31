@@ -360,9 +360,7 @@ void NDS::update_arm7_irq_signals() {
 }
 
 void NDS::update_arm9_irq_signals() {
-    // ARM9 stub has no set_irq_line() yet, so cache the line for X-Ray.
-    // Becomes cpu9_.set_irq_line(irq9_.line()) once the ARM9 decoder lands.
-    arm9_irq_line_cached_ = irq9_.line();
+    cpu9_.set_irq_line(irq9_.line());
 }
 
 void NDS::seed_rtc_from_host_time(u16 year, u8 month, u8 day, u8 dow, u8 hh, u8 mm, u8 ss) {
