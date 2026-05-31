@@ -19,6 +19,7 @@ NDS::NDS()
     // which in later slices will touch bus_ for cart-header reads during
     // direct boot. Do not reorder these calls, and do not sink reset() into
     // a default member initializer.
+    cpu9_.attach_bus(arm9_bus_);
     cpu7_.attach_bus(arm7_bus_);
     reset();
 }
