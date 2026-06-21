@@ -6,6 +6,7 @@ add_library(ds_core STATIC
     bus/arm7_bus.cpp
     scheduler/scheduler.cpp
     cpu/arm9/arm9.cpp
+    cpu/arm9/arm9_branch.cpp
     cpu/arm9/arm9_decode.cpp
     cpu/arm9/arm9_decode_000.cpp
     cpu/arm9/arm9_decode_stubs.cpp

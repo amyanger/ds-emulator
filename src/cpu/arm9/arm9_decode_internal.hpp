@@ -67,8 +67,8 @@ u32 dispatch_dp(Arm9State& state, u32 instr, u32 instr_addr);
 u32 execute_dp_op(
     Arm9State& state, DpOp op, u32 rn_value, u32 operand2, bool shifter_carry, bool s_flag, u32 rd);
 
-// Branch / branch-and-link dispatcher.
-// Warn-stub in commit 5; real executor lands in commit 7.
+// Branch / branch-and-link (B, BL) dispatcher. No ARMv5 divergence; faithful
+// port of ARM7's dispatch_branch (arm9_branch.cpp). BLX-imm is deferred to 3m.
 u32 dispatch_branch(Arm9State& state, u32 instr);
 
 // Single data transfer (LDR / STR word/byte) dispatcher.

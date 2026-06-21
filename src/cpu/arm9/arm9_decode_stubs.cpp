@@ -9,12 +9,6 @@
 
 namespace ds {
 
-u32 dispatch_branch(Arm9State& state, u32 instr) {
-    DS_LOG_WARN("arm9: branch stub — executor unimplemented (commit 7) instr=0x%08X", instr);
-    (void) state;
-    return 1;
-}
-
 u32 dispatch_single_data_transfer(Arm9State& state, Arm9Bus& bus, u32 instr, u32 instr_addr) {
     DS_LOG_WARN("arm9: LDR/STR stub — executor unimplemented (commit 8) instr=0x%08X addr=0x%08X",
                 instr,
