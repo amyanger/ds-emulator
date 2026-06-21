@@ -57,8 +57,15 @@ inline u32 rotate_read_word(u32 raw, u32 addr) {
 u32 dispatch_000_space(Arm9State& state, Arm9Bus& bus, u32 instr, u32 instr_addr);
 
 // Data-processing (DP) dispatcher.
-// Warn-stub in commit 5; real executor lands in commit 6.
 u32 dispatch_dp(Arm9State& state, u32 instr, u32 instr_addr);
+
+// Shared ARMv4T-subset data-processing executor. Callers pre-materialize all
+// operands (including any PC pipeline offset on rn_value) so the same body
+// serves ARM-state dispatch_dp and the Thumb DP handlers (slice 3n). The DP
+// family has no ARMv5 divergence, so this is a faithful peer of ARM7's
+// execute_dp_op.
+u32 execute_dp_op(
+    Arm9State& state, DpOp op, u32 rn_value, u32 operand2, bool shifter_carry, bool s_flag, u32 rd);
 
 // Branch / branch-and-link dispatcher.
 // Warn-stub in commit 5; real executor lands in commit 7.
